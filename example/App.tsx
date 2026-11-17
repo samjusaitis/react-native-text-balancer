@@ -218,6 +218,155 @@ function FitProbe() {
   );
 }
 
+
+// PROTOTYPE (ticket 14): one sample per script/feature for ticket 11's plan inputs.
+const T14: {
+  label: string;
+  fontSize: number;
+  props?: object;
+  children: React.ReactNode;
+  text: string; // for logs
+}[] = [
+  {
+    label: 'Hyphenated compounds',
+    fontSize: 22,
+    text: 'hyphen',
+    children: 'State-of-the-art, well-known and up-to-date cross-platform text-wrapping for real-world apps',
+  },
+  {
+    label: 'Japanese (kinsoku)',
+    fontSize: 20,
+    text: 'ja',
+    children: '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。',
+  },
+  {
+    label: 'Chinese',
+    fontSize: 20,
+    text: 'zh',
+    children: '平衡文本换行让标题在每一行上看起来更加整齐，避免最后一行只剩下一两个字的情况。',
+  },
+  {
+    label: 'Korean (default)',
+    fontSize: 20,
+    text: 'ko',
+    children: '균형 잡힌 텍스트 줄바꿈은 제목을 여러 줄에 걸쳐 고르게 나누어 마지막 줄에 단어 하나만 남는 것을 막아 줍니다.',
+  },
+  {
+    label: 'Korean (hangul-word)',
+    fontSize: 20,
+    text: 'ko-hw',
+    props: { lineBreakStrategyIOS: 'hangul-word' },
+    // Different string on purpose: RN's TextMeasureCache ignores lineBreakStrategy, so an identical
+    // string would reuse the default sample's measurement and lines (stock RN bug, found in ticket 14).
+    children: '균형 잡힌 텍스트 줄바꿈은 제목을 여러 줄에 걸쳐 고르게 나누어 마지막 줄에 단어 하나만 남는 것을 막아 줍니다!',
+  },
+  {
+    label: 'Thai',
+    fontSize: 20,
+    text: 'th',
+    children: 'การตัดบรรทัดข้อความให้สมดุลช่วยให้หัวข้อดูเรียบร้อยบนทุกหน้าจอและทุกอุปกรณ์ของผู้ใช้',
+  },
+  {
+    label: 'Arabic + English',
+    fontSize: 20,
+    text: 'ar-en',
+    children: 'استخدم React Native لبناء تطبيقات iOS و Android بنص متوازن على كل الشاشات',
+  },
+  {
+    label: 'View inside Text',
+    fontSize: 18,
+    text: 'view',
+    children: (
+      <>
+        Inline <View style={{ width: 24, height: 14, backgroundColor: '#c33' }} /> attachment inside wrapped text here and a
+        bit more text after it
+      </>
+    ),
+  },
+  {
+    label: 'Soft hyphen',
+    fontSize: 20,
+    text: 'shy',
+    children:
+      'Extra­ordinarily long compounds like Donau­dampf­schiff­fahrts­gesell­schaft test soft hyphens',
+  },
+  {
+    label: 'Tab (skipped)',
+    fontSize: 18,
+    text: 'tab',
+    children: 'Name:\tA tab makes widths depend on position, so this paragraph is skipped by the plan',
+  },
+  // Ticket 15 rule: pushOut is cleared only while a verified plan is applied.
+  {
+    label: 'push-out (balanced, pushOut cleared)',
+    fontSize: 20,
+    text: 'push',
+    props: { lineBreakStrategyIOS: 'push-out' },
+    children: 'Push-out line breaking fights the plan so this paragraph keeps stock wrapping',
+  },
+  {
+    label: 'push-out + tab (stock, pushOut kept)',
+    fontSize: 18,
+    text: 'push-tab',
+    props: { lineBreakStrategyIOS: 'push-out' },
+    // Same words as the tab sample plus "too": distinct string so RN's measure cache (which ignores
+    // lineBreakStrategy) doesn't reuse the plain tab sample's layout.
+    children: 'Name:\tA tab makes widths depend on position, so this paragraph is skipped by the plan\u2060',
+  },
+  {
+    label: 'tab, no push-out (reference for the row above)',
+    fontSize: 18,
+    text: 'tab2',
+    children: 'Name:\tA tab makes widths depend on position, so this paragraph is skipped by the plan\u2060\u2060',
+  },
+  {
+    label: 'no push-out (reference for push-out balanced row)',
+    fontSize: 20,
+    text: 'push-ref',
+    children: 'Push-out line breaking fights the plan so this paragraph keeps stock wrapping\u2060',
+  },
+];
+
+function T14Samples({ record, lines }: { record: (k: string, v: string) => void; lines: Lines }) {
+  return (
+    <>
+      {T14.map((s) => (
+        <View key={s.label} style={styles.group}>
+          <Text style={styles.label}>{s.label}</Text>
+          {WIDTHS.map((w) => {
+            const a = lines[layoutKey(s.label, w, 'stock')];
+            const c = lines[layoutKey(s.label, w, 'ours')];
+            return (
+              <View key={w} style={{ gap: 4 }}>
+                <Text style={styles.width}>
+                  {w}pt · ours {a && c ? (a === c ? 'same as stock' : 'balanced') : '…'}
+                </Text>
+                {(['stock', 'ours'] as Row[]).map((r) => (
+                  <View key={r} style={styles.box}>
+                    <Text style={styles.width}>{ROW_LABEL[r]}</Text>
+                    <SampleText
+                      row={r}
+                      {...s.props}
+                      onTextLayout={(e) => record(layoutKey(s.label, w, r), linesOf(e))}
+                      style={{
+                        width: w,
+                        fontSize: s.fontSize,
+                        color: '#111',
+                        backgroundColor: r === 'ours' ? '#eef6ff' : '#f6f6f6',
+                      }}>
+                      {s.children}
+                    </SampleText>
+                  </View>
+                ))}
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </>
+  );
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -244,11 +393,25 @@ function Screen() {
       }
     }
   }, [done.length]);
+  const t14Keys = T14.flatMap((s) => WIDTHS.map((w) => [s.label, w] as const));
+  const t14Done = t14Keys.filter(([s, w]) => lines[layoutKey(s, w, 'stock')] && lines[layoutKey(s, w, 'ours')]);
+  React.useEffect(() => {
+    if (t14Done.length !== t14Keys.length) return;
+    // Dump once layouts have been quiet for 2s (late re-layouts included).
+    const id = setTimeout(() => {
+      console.log('[t14] ---- dump ----');
+      for (const [s, w] of t14Keys) {
+        console.log(`[t14] ${s} ${w} stock: ${lines[layoutKey(s, w, 'stock')]}`);
+        console.log(`[t14] ${s} ${w} ours : ${lines[layoutKey(s, w, 'ours')]}`);
+      }
+    }, 2000);
+    return () => clearTimeout(id);
+  }, [lines]);
 
   return (
     <View style={styles.container}>
       <View style={[styles.bar, { paddingTop: styles.bar.padding + insets.top }]}>
-        <Text style={styles.barText}>iOS 10: own paragraph component</Text>
+        <Text style={styles.barText}>iOS 14: plan inputs</Text>
         <Pressable onPress={() => setProbes((p) => !p)} style={styles.toggle}>
           <Text>{probes ? 'samples' : 'probes'}</Text>
         </Pressable>
@@ -261,6 +424,7 @@ function Screen() {
         {probes && <PressProbe />}
         {probes && <MiscProbe />}
         {probes && <FitProbe />}
+        {!probes && <T14Samples record={record} lines={lines} />}
         {!probes &&
           SAMPLES.map((s) => (
             <View key={s.label} style={styles.group}>
