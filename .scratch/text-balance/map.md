@@ -8,6 +8,7 @@ A hand-off-ready **spec** for `react-native-text-balancer`: a drop-in `Text` (im
 
 ## Notes
 
+- **Isolation (Sam, 2026-11-17):** the library's `Text` runs alongside RN's own `Text` and must not change its behaviour. On Android, `balance` just sets RN's own `textBreakStrategy="balanced"`. On iOS, balancing is a custom native implementation that only the library's `Text` can trigger: a plain RN `<Text textBreakStrategy="balanced">` must still render exactly as stock RN on iOS. So the swizzle and the `textBreakStrategy="balanced"` flag that the iOS prototypes (04, 06, 08) used were prototype-only. Ticket 09 replaces them with the library's own paragraph component.
 - New architecture (Fabric/TurboModules) only.
 - Balancing is computed natively on both platforms; no JS-side measure loop.
 - Android: first test whether `textBreakStrategy="balanced"` is sufficient; otherwise implement natively.
@@ -28,18 +29,20 @@ A hand-off-ready **spec** for `react-native-text-balancer`: a drop-in `Text` (im
 - [05 iOS balancing alternatives research](issues/05-ios-balancing-alternatives-research.md): keep the swizzled hook but balance after RN's font scaling and narrow with `NSTextContainer.exclusionPaths` instead of `tailIndent`, which should fix both trade-offs (unverified, needs a spike); a per-line break plan is the route to min-raggedness; upstreaming to RN is the long-term option.
 - [06 iOS exclusionPaths prototype](issues/06-ios-exclusion-paths-prototype.md): exclusion-path strip applied after RN's font scaling fixes both 04 trade-offs (highlight stops at the balanced edge; `adjustsFontSizeToFit` balances, truncating `numberOfLines` is skipped); alignment and RTL correct; ~1ms per build, same as tailIndent; stock RN draws RTL press highlights in the wrong place (character range passed as a glyph range), separate from balancing.
 - [08 iOS min-raggedness prototype](issues/08-ios-min-raggedness-prototype.md): iOS uses minimum raggedness, not the max-width squeeze, and offers no option. Per paragraph, a DP over word widths (one `CTLine`) at the full-width line count, imposed by an `NSTextContainer` subclass with per-line widths keyed by line start index. It matches Android `balanced` line for line on the hard samples, balances each paragraph separately, and costs a 0.59ms median vs. the squeeze's 1.26ms. The squeeze is kept only as a fallback if the breaks don't match the plan.
+- [09 iOS hook delivery grilling](issues/09-ios-hook-delivery-grilling.md): no swizzle and no RN patch. On iOS, `balance` renders the library's own Fabric component (`BalancedParagraph`, built from subclasses of RN's `ParagraphShadowNode`, `TextLayoutManager`, `RCTTextLayoutManager` and `RCTParagraphComponentView`), so RN's `Text` is never touched ([ADR 0001](../../docs/adr/0001-ios-own-paragraph-component.md)). Prop is `balance`; off means plain RN `Text`. Min-raggedness only, with a stock fallback (the squeeze is dropped). RN ≥ 0.85 with a per-SDK CI matrix. A missing private selector means stock layout plus one dev warning. No upstream RN track.
 
 ## Not yet specified
 
 - Native module vs. wrapping/subclassing RN's native Text view (Fabric component): iOS mechanism settled (swizzled hook + exclusion-path strip, per 06); still open: swizzle vs. an upstream RN change; also stability of swizzling a private RN selector across versions.
 - iOS algorithm detail: Android's balanced evens out all lines (not a max-width squeeze), so decide binary search vs. Knuth-Plass-style minimum raggedness for iOS visual parity (the 04 spike's squeeze leaves monospace text ragged; 05 names a per-line break plan via delegate veto or `NSTextContainer` subclass as the route); caching (~1ms per stack build, recomputed on every measure/draw/hit-test); per-paragraph insets.
-- iOS min-raggedness break candidates: only spaces in the 08 spike; hyphens, CJK and bidi-mixed paragraphs need break opportunities that match TextKit's (otherwise they fall back to the squeeze).
+- iOS min-raggedness break candidates: only spaces in the 08 spike; hyphens, CJK and bidi-mixed paragraphs need break opportunities that match TextKit's (otherwise they fall back to stock wrapping).
 - Example app links the package by bun copy (`file:..`), so native edits need a sync; decide link vs. copy when packaging.
 - Android re-render bug: `textBreakStrategy` changes not re-applied when toggling back; remount via `key` in the wrapper vs. a native fix (check RN source/version).
 - Interaction with other `Text` props: `numberOfLines`, `ellipsizeMode`, `adjustsFontSizeToFit`, `allowFontScaling`, `lineBreakStrategyIOS`, `textBreakStrategy`, RTL/emoji/mixed fonts.
 - Behaviour with nested/inline `<Text>` spans (currently out of scope; revisit how to degrade gracefully).
 - Cross-platform parity: how close, and whether to normalize Android's behaviour with the custom algorithm.
-- Packaging/tooling: library scaffold (e.g. create-react-native-library), codegen, Expo dev build / config plugin support.
+- Packaging/tooling: library scaffold (e.g. create-react-native-library), Expo dev build / config plugin support. iOS now needs a codegen host component next to the Expo module (ticket 10 checks that they can coexist).
+- iOS: proving the own-paragraph-component mechanism (nested spans, press, `selectable`, a11y, attachments, RN 0.85+ header drift): [ticket 10](issues/10-ios-own-paragraph-component-prototype.md).
 
 ## Out of scope
 
