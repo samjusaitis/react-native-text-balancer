@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Test strings for balance behaviour: short/long, multi-line, mixed scripts, RTL, emoji.
@@ -48,12 +48,34 @@ const SAMPLES: {
     fontSize: 22,
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
   },
+  // PROTOTYPE (ticket 08): multi-paragraph text; squeeze shares one strip, min-raggedness plans per paragraph.
+  {
+    label: 'Multi-paragraph',
+    text: 'A short first paragraph that wraps onto two lines.\nThe second paragraph is a fair bit longer, so it wraps onto three or maybe four lines at this width.',
+    fontSize: 17,
+  },
 ];
+
+// PROTOTYPE (ticket 08): balance mode. iOS min-raggedness is flagged by the Android-only
+// android_hyphenationFrequency="full" (parsed into ParagraphAttributes on iOS, otherwise unused).
+type Mode = 'off' | 'squeeze' | 'minrag';
+const MODES: Mode[] = ['off', 'squeeze', 'minrag'];
+function modeProps(mode: Mode): object {
+  return {
+    textBreakStrategy: mode === 'off' ? 'highQuality' : 'balanced',
+    ...(Platform.OS === 'ios' && mode === 'minrag' ? { android_hyphenationFrequency: 'full' } : {}),
+  };
+}
+const COMPARE: Mode[] = Platform.OS === 'ios' ? ['squeeze', 'minrag'] : ['squeeze'];
+const MODE_LABEL: Record<Mode, string> =
+  Platform.OS === 'ios'
+    ? { off: 'off', squeeze: 'squeeze', minrag: 'min-raggedness' }
+    : { off: 'off', squeeze: 'balanced', minrag: 'balanced' };
 
 const WIDTHS = [320, 240, 180];
 
 // PROTOTYPE (ticket 04): checks hit-testing and onTextLayout agree with the balanced draw.
-function HitTestProbe({ balance }: { balance: boolean }) {
+function HitTestProbe({ mode }: { mode: Mode }) {
   const [taps, setTaps] = useState(0);
   const [lines, setLines] = useState('');
   return (
@@ -61,8 +83,8 @@ function HitTestProbe({ balance }: { balance: boolean }) {
       <Text style={styles.label}>Hit-test + onTextLayout (tap the blue span)</Text>
       <View style={styles.box}>
         <Text
-          key={balance ? 'balanced' : 'highQuality'}
-          textBreakStrategy={balance ? 'balanced' : 'highQuality'}
+          key={mode}
+          {...modeProps(mode)}
           onTextLayout={(e) =>
             setLines(e.nativeEvent.lines.map((l) => `${Math.round(l.width)}`).join(' / '))
           }
@@ -127,7 +149,7 @@ const HIGHLIGHT_CASES: {
   },
 ];
 
-function HighlightProbe({ balance }: { balance: boolean }) {
+function HighlightProbe({ mode }: { mode: Mode }) {
   const [taps, setTaps] = useState(0);
   return (
     <View style={styles.group}>
@@ -138,8 +160,8 @@ function HighlightProbe({ balance }: { balance: boolean }) {
             <View key={String(pinned)} style={styles.box}>
               <Text style={styles.width}>{c.label} 170pt</Text>
               <Text
-                key={balance ? 'balanced' : 'highQuality'}
-                textBreakStrategy={balance ? 'balanced' : 'highQuality'}
+                key={mode}
+          {...modeProps(mode)}
                 style={{ width: 170, fontSize: 17, color: '#111', textAlign: c.textAlign, writingDirection: c.writingDirection }}>
                 {c.before}{' '}
                 {pinned ? (
@@ -187,7 +209,7 @@ const FIT_CASES: { label: string; props: object; style: object }[] = [
   },
 ];
 
-function FitProbe({ balance }: { balance: boolean }) {
+function FitProbe({ mode }: { mode: Mode }) {
   return (
     <View style={styles.group}>
       <Text style={styles.label}>Font scaling + numberOfLines</Text>
@@ -195,8 +217,8 @@ function FitProbe({ balance }: { balance: boolean }) {
         <View key={c.label} style={styles.box}>
           <Text style={styles.width}>{c.label}</Text>
           <Text
-            key={balance ? 'balanced' : 'highQuality'}
-            textBreakStrategy={balance ? 'balanced' : 'highQuality'}
+            key={mode}
+          {...modeProps(mode)}
             {...c.props}
             style={[{ color: '#111', backgroundColor: '#f6f6f6' }, c.style]}>
             {FIT_TEXT}
@@ -219,47 +241,57 @@ export default function App() {
 
 function Screen() {
   const insets = useSafeAreaInsets();
-  const [balance, setBalance] = useState(true);
+  const [mode, setMode] = useState<Mode>('squeeze');
+  const [probes, setProbes] = useState(false);
+  const rows: Mode[] = mode === 'off' ? ['off'] : COMPARE;
 
   return (
     <View style={styles.container}>
       <View style={[styles.bar, { paddingTop: styles.bar.padding + insets.top }]}>
         <Text style={styles.barText}>
-          {Platform.OS === 'android'
-            ? 'textBreakStrategy: balanced'
-            : 'balance (iOS: exclusionPaths prototype)'}
+          {Platform.OS === 'android' ? 'textBreakStrategy' : 'iOS 08: squeeze vs min-rag'}
         </Text>
-        <Pressable onPress={() => setBalance((b) => !b)} style={styles.toggle}>
-          <Text>{balance ? 'ON' : 'OFF'}</Text>
+        <Pressable
+          onPress={() => setMode((m) => (m === 'off' ? 'squeeze' : 'off'))}
+          style={styles.toggle}>
+          <Text>{mode === 'off' ? 'OFF' : 'ON'}</Text>
         </Pressable>
-        <Switch value={balance} onValueChange={setBalance} />
+        <Pressable onPress={() => setProbes((p) => !p)} style={styles.toggle}>
+          <Text>probes: {probes ? (mode === 'off' ? 'off' : 'min-rag') : 'hidden'}</Text>
+        </Pressable>
       </View>
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
           { paddingBottom: styles.scroll.padding + insets.bottom },
         ]}>
-        <HighlightProbe balance={balance} />
-        <FitProbe balance={balance} />
-        <HitTestProbe balance={balance} />
+        {probes && <HighlightProbe mode={mode === 'off' ? 'off' : 'minrag'} />}
+        {probes && <FitProbe mode={mode === 'off' ? 'off' : 'minrag'} />}
+        {probes && <HitTestProbe mode={mode === 'off' ? 'off' : 'minrag'} />}
         {SAMPLES.map((s) => (
           <View key={s.label} style={styles.group}>
             <Text style={styles.label}>{s.label}</Text>
             {WIDTHS.map((w) => (
-              <View key={w} style={styles.box}>
-                <Text style={styles.width}>{w}pt</Text>
-                <Text
-                  key={balance ? 'balanced' : 'highQuality'}
-                  style={{
-                    width: w,
-                    fontSize: s.fontSize,
-                    fontFamily: s.fontFamily,
-                    textAlign: s.textAlign,
-                    color: '#111',
-                  }}
-                  textBreakStrategy={balance ? 'balanced' : 'highQuality'}>
-                  {s.text}
-                </Text>
+              <View key={w} style={{ gap: 4 }}>
+                {rows.map((m) => (
+                  <View key={m} style={styles.box}>
+                    <Text style={styles.width}>
+                      {w}pt · {MODE_LABEL[m]}
+                    </Text>
+                    <Text
+                      {...modeProps(m)}
+                      style={{
+                        width: w,
+                        fontSize: s.fontSize,
+                        fontFamily: s.fontFamily,
+                        textAlign: s.textAlign,
+                        color: '#111',
+                        backgroundColor: m === 'minrag' ? '#eef6ff' : '#f6f6f6',
+                      }}>
+                      {s.text}
+                    </Text>
+                  </View>
+                ))}
               </View>
             ))}
           </View>
