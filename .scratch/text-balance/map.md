@@ -40,7 +40,7 @@ A hand-off-ready **spec** for `react-native-text-balancer`: an iOS **polyfill** 
 
 ## Not yet specified
 
-- Writing the hand-off spec itself once the remaining tickets resolve: structure, and what goes in it vs. linked from the tickets and ADR.
+_Nothing left: every ticket is resolved. The hand-off spec is written: [spec.md](spec.md) (ready-for-agent)._
 
 ## Out of scope
 
