@@ -1,15 +1,18 @@
-// PROTOTYPE (ticket 04, iOS tailIndent injection spike). Throwaway, do not ship as-is.
+// PROTOTYPE (tickets 04 + 06, iOS balance injection spike). Throwaway, do not ship as-is.
 //
-// Question: can a balanced wrap width be injected into RN Fabric's iOS Text so that
-// measure, draw, hit-test and onTextLayout all agree, without forking RN?
+// Question (06): does narrowing with NSTextContainer.exclusionPaths, applied after RN's
+// scaleFontSizeToFitSize:, fix 04's trade-offs (press highlight overflowing to the box edge,
+// no adjustsFontSizeToFit) while measure, draw, hit-test and onTextLayout still agree?
 //
 // Approach: every one of those paths builds its TextKit 1 stack through the private
 // -[RCTTextLayoutManager _textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:].
 // We swizzle it. When paragraphAttributes.textBreakStrategy == Balanced (the existing,
-// Android-only prop, which is still parsed into ParagraphAttributes on iOS), we
-// binary-search the narrowest width that keeps the full-width line count, then apply the
-// difference as a negative NSParagraphStyle.tailIndent on the returned storage. The text
-// container (and so the Yoga box) stays full width, like CSS `text-wrap: balance`.
+// Android-only prop, which is still parsed into ParagraphAttributes on iOS), we call the
+// original first (so any font scaling has already happened), then binary-search the
+// narrowest exclusion strip on RN's own container that keeps the full-width line count.
+// The strip sits on the trailing side (left for right-aligned / RTL text), or half on each
+// side for centred text. The container (and so the Yoga box) stays full width, like CSS
+// `text-wrap: balance`; the line fragment rects shrink, so selection/highlight rects do too.
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -24,71 +27,45 @@ using facebook::react::TextBreakStrategy;
 typedef NSTextStorage *(*BuildIMP)(id, SEL, NSAttributedString *, ParagraphAttributes, CGSize);
 static BuildIMP gOriginal = nullptr;
 
-static NSUInteger lineCount(NSAttributedString *string, CGFloat width)
-{
-  NSTextContainer *container = [[NSTextContainer alloc] initWithSize:CGSizeMake(width, CGFLOAT_MAX)];
-  container.lineFragmentPadding = 0;
-  NSLayoutManager *layoutManager = [NSLayoutManager new];
-  layoutManager.usesFontLeading = NO;
-  [layoutManager addTextContainer:container];
-  NSTextStorage *storage = [[NSTextStorage alloc] initWithAttributedString:string];
-  [storage addLayoutManager:layoutManager];
-  [layoutManager ensureLayoutForTextContainer:container];
+static const CGFloat kStripHeight = 1e7; // finite stand-in for measure's CGFLOAT_MAX height
 
+typedef NS_ENUM(NSInteger, StripSide) { StripRight, StripLeft, StripBoth };
+
+static NSArray<UIBezierPath *> *strips(CGFloat width, CGFloat inset, StripSide side)
+{
+  if (inset <= 0) {
+    return @[];
+  }
+  switch (side) {
+    case StripRight:
+      return @[ [UIBezierPath bezierPathWithRect:CGRectMake(width - inset, 0, inset, kStripHeight)] ];
+    case StripLeft:
+      return @[ [UIBezierPath bezierPathWithRect:CGRectMake(0, 0, inset, kStripHeight)] ];
+    case StripBoth:
+      return @[
+        [UIBezierPath bezierPathWithRect:CGRectMake(0, 0, inset / 2, kStripHeight)],
+        [UIBezierPath bezierPathWithRect:CGRectMake(width - inset / 2, 0, inset / 2, kStripHeight)],
+      ];
+  }
+}
+
+static NSUInteger countLines(NSLayoutManager *layoutManager, NSTextContainer *container, CGRect *outShortest)
+{
+  [layoutManager ensureLayoutForTextContainer:container];
   __block NSUInteger lines = 0;
+  __block CGRect shortest = CGRectNull;
   NSRange glyphRange = [layoutManager glyphRangeForTextContainer:container];
   [layoutManager enumerateLineFragmentsForGlyphRange:glyphRange
-                                          usingBlock:^(CGRect, CGRect, NSTextContainer *, NSRange, BOOL *) {
+                                          usingBlock:^(CGRect, CGRect usedRect, NSTextContainer *, NSRange, BOOL *) {
                                             lines++;
+                                            if (CGRectIsNull(shortest) || usedRect.size.width < shortest.size.width) {
+                                              shortest = usedRect;
+                                            }
                                           }];
+  if (outShortest) {
+    *outShortest = shortest;
+  }
   return lines;
-}
-
-// Narrowest width (0.5pt precision) that keeps the same line count as `width`.
-static CGFloat balancedWidth(NSAttributedString *string, CGFloat width, NSUInteger *outLines)
-{
-  NSUInteger target = lineCount(string, width);
-  *outLines = target;
-  if (target <= 1) {
-    return width;
-  }
-  CGFloat lo = width / target, hi = width; // lines can't fit narrower than width/target on average
-  while (hi - lo > 0.5) {
-    CGFloat mid = (lo + hi) / 2;
-    if (lineCount(string, mid) <= target) {
-      hi = mid;
-    } else {
-      lo = mid;
-    }
-  }
-  return hi;
-}
-
-static void applyInset(NSTextStorage *storage, CGFloat inset)
-{
-  NSRange full = NSMakeRange(0, storage.length);
-  NSMutableArray *edits = [NSMutableArray new];
-  [storage enumerateAttribute:NSParagraphStyleAttributeName
-                      inRange:full
-                      options:0
-                   usingBlock:^(NSParagraphStyle *style, NSRange range, BOOL *) {
-                     NSMutableParagraphStyle *ps =
-                         style ? [style mutableCopy] : [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
-                     if (ps.alignment == NSTextAlignmentCenter) {
-                       // Split the inset so centred lines stay centred in the full box.
-                       ps.headIndent += inset / 2;
-                       ps.firstLineHeadIndent += inset / 2;
-                       ps.tailIndent = -inset / 2;
-                     } else {
-                       ps.tailIndent = -inset;
-                     }
-                     [edits addObject:@[ [NSValue valueWithRange:range], ps ]];
-                   }];
-  [storage beginEditing];
-  for (NSArray *edit in edits) {
-    [storage addAttribute:NSParagraphStyleAttributeName value:edit[1] range:[edit[0] rangeValue]];
-  }
-  [storage endEditing];
 }
 
 static NSUInteger gCalls = 0;
@@ -102,27 +79,73 @@ static NSTextStorage *balancedBuild(
     CGSize size)
 {
   NSTextStorage *storage = gOriginal(self, _cmd, string, paragraphAttributes, size);
-  if (paragraphAttributes.textBreakStrategy != TextBreakStrategy::Balanced || paragraphAttributes.adjustsFontSizeToFit ||
-      storage.length == 0 || !isfinite(size.width) || size.width <= 0 || size.width > 100000) {
+  if (paragraphAttributes.textBreakStrategy != TextBreakStrategy::Balanced || storage.length == 0 ||
+      !isfinite(size.width) || size.width <= 0 || size.width > 100000) {
     return storage;
   }
 
   CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
-  NSUInteger lines = 0;
-  CGFloat width = balancedWidth(storage, size.width, &lines);
-  CGFloat inset = size.width - width;
-  if (inset > 0.5) {
-    applyInset(storage, inset);
+  NSLayoutManager *layoutManager = storage.layoutManagers.firstObject;
+  NSTextContainer *container = layoutManager.textContainers.firstObject;
+  CGFloat W = size.width;
+
+  // Count on RN's own stack (already font-scaled), but untruncated and unbounded in height,
+  // so a narrower strip shows up as an extra line rather than as truncation or clipping.
+  CGSize savedSize = container.size;
+  NSUInteger savedMaxLines = container.maximumNumberOfLines;
+  NSLineBreakMode savedMode = container.lineBreakMode;
+  container.size = CGSizeMake(W, kStripHeight);
+  container.maximumNumberOfLines = 0;
+  container.lineBreakMode = NSLineBreakByWordWrapping;
+
+  CGRect shortest;
+  NSUInteger target = countLines(layoutManager, container, &shortest);
+  NSUInteger maxLines = paragraphAttributes.maximumNumberOfLines;
+  BOOL truncated = maxLines > 0 && target > maxLines;
+
+  // Which side the strip goes on: explicit centre → both; otherwise look at where the
+  // shortest full-width line sits (covers right alignment and RTL natural alignment).
+  NSParagraphStyle *style = [storage attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
+  StripSide side = StripRight;
+  if (style.alignment == NSTextAlignmentCenter) {
+    side = StripBoth;
+  } else if (!CGRectIsNull(shortest) && CGRectGetMinX(shortest) > W - CGRectGetMaxX(shortest) + 0.5) {
+    side = StripLeft;
   }
+
+  CGFloat inset = 0;
+  if (!truncated && target > 1) {
+    CGFloat lo = 0, hi = W - W / target; // inset range; lines can't average narrower than W/target
+    while (hi - lo > 0.5) {
+      CGFloat mid = (lo + hi) / 2;
+      container.exclusionPaths = strips(W, mid, side);
+      if (countLines(layoutManager, container, nullptr) <= target) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    inset = lo;
+  }
+
+  container.size = savedSize;
+  container.maximumNumberOfLines = savedMaxLines;
+  container.lineBreakMode = savedMode;
+  container.exclusionPaths = inset > 0.5 ? strips(W, inset, side) : @[];
+
   double ms = (CFAbsoluteTimeGetCurrent() - start) * 1000;
   gCalls++;
   gTotalMs += ms;
   os_log(
       OS_LOG_DEFAULT,
-      "[TextBalancer prototype] w=%.1f lines=%lu balanced=%.1f inset=%.1f %.2fms (avg %.2fms over %lu calls)",
-      size.width,
-      (unsigned long)lines,
-      width,
+      "[TextBalancer prototype] w=%.1f h=%.1f lines=%lu maxLines=%lu truncated=%d side=%ld scaled=%d inset=%.1f %.2fms (avg %.2fms over %lu calls)",
+      W,
+      size.height,
+      (unsigned long)target,
+      (unsigned long)maxLines,
+      truncated,
+      (long)side,
+      paragraphAttributes.adjustsFontSizeToFit,
       inset,
       ms,
       gTotalMs / gCalls,
@@ -145,7 +168,7 @@ static NSTextStorage *balancedBuild(
     return;
   }
   gOriginal = (BuildIMP)method_setImplementation(method, (IMP)balancedBuild);
-  os_log(OS_LOG_DEFAULT, "[TextBalancer prototype] swizzled RCTTextLayoutManager");
+  os_log(OS_LOG_DEFAULT, "[TextBalancer prototype] swizzled RCTTextLayoutManager (exclusionPaths)");
 }
 
 @end

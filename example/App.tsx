@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Test strings for balance behaviour: short/long, multi-line, mixed scripts, RTL, emoji.
@@ -81,6 +81,132 @@ function HitTestProbe({ balance }: { balance: boolean }) {
   );
 }
 
+// PROTOTYPE (ticket 06): press highlight on a nested span that wraps across lines.
+// `pinned` forces the native isHighlighted attribute (normally only set while pressed) so the
+// highlight can be screenshotted; the unpinned span is the real pressable one.
+const HIGHLIGHT_CASES: {
+  label: string;
+  before: string;
+  span: string;
+  after: string;
+  textAlign?: 'center' | 'right';
+  writingDirection?: 'rtl';
+}[] = [
+  {
+    label: 'LTR',
+    before: 'Balanced lines keep the pressed',
+    span: 'nested span highlight inside the narrowed',
+    after: 'edge of the text',
+  },
+  {
+    label: 'Centred',
+    before: 'Balanced lines keep the pressed',
+    span: 'nested span highlight inside the narrowed',
+    after: 'edge of the text',
+    textAlign: 'center',
+  },
+  {
+    label: 'Right-aligned',
+    before: 'Balanced lines keep the pressed',
+    span: 'nested span highlight inside the narrowed',
+    after: 'edge of the text',
+    textAlign: 'right',
+  },
+  {
+    label: 'RTL (Arabic)',
+    before: 'تغليف النص المتوازن',
+    span: 'لتطبيقات رياكت نيتف على جميع',
+    after: 'الأجهزة والشاشات',
+  },
+  {
+    label: 'RTL writingDirection',
+    before: 'تغليف النص المتوازن',
+    span: 'لتطبيقات رياكت نيتف على جميع',
+    after: 'الأجهزة والشاشات',
+    writingDirection: 'rtl',
+  },
+];
+
+function HighlightProbe({ balance }: { balance: boolean }) {
+  const [taps, setTaps] = useState(0);
+  return (
+    <View style={styles.group}>
+      <Text style={styles.label}>Wrapped span highlight (orange = pinned, blue = press) · taps: {taps}</Text>
+      {HIGHLIGHT_CASES.map((c) => (
+        <View key={c.label} style={{ flexDirection: 'row', gap: 8 }}>
+          {[true, false].map((pinned) => (
+            <View key={String(pinned)} style={styles.box}>
+              <Text style={styles.width}>{c.label} 170pt</Text>
+              <Text
+                key={balance ? 'balanced' : 'highQuality'}
+                textBreakStrategy={balance ? 'balanced' : 'highQuality'}
+                style={{ width: 170, fontSize: 17, color: '#111', textAlign: c.textAlign, writingDirection: c.writingDirection }}>
+                {c.before}{' '}
+                {pinned ? (
+                  <Text style={{ color: '#c60' }} {...({ isHighlighted: true } as object)}>
+                    {c.span}
+                  </Text>
+                ) : (
+                  <Text style={{ color: '#06c' }} onPress={() => setTaps((t) => t + 1)}>
+                    {c.span}
+                  </Text>
+                )}{' '}
+                {c.after}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// PROTOTYPE (ticket 06): adjustsFontSizeToFit and numberOfLines interaction.
+const FIT_TEXT =
+  'The quick brown fox jumps over the lazy dog while the rest of the pack watches from a distance';
+const FIT_CASES: { label: string; props: object; style: object }[] = [
+  {
+    label: 'adjustsFontSizeToFit, 240x90 box',
+    props: { adjustsFontSizeToFit: true },
+    style: { width: 240, height: 90, fontSize: 28 },
+  },
+  {
+    label: 'adjustsFontSizeToFit + numberOfLines=2, 240pt',
+    props: { adjustsFontSizeToFit: true, numberOfLines: 2 },
+    style: { width: 240, fontSize: 28 },
+  },
+  {
+    label: 'numberOfLines=2 truncates (expect no balance)',
+    props: { numberOfLines: 2 },
+    style: { width: 240, fontSize: 22 },
+  },
+  {
+    label: 'numberOfLines=5 fits (expect balance)',
+    props: { numberOfLines: 5 },
+    style: { width: 240, fontSize: 22 },
+  },
+];
+
+function FitProbe({ balance }: { balance: boolean }) {
+  return (
+    <View style={styles.group}>
+      <Text style={styles.label}>Font scaling + numberOfLines</Text>
+      {FIT_CASES.map((c) => (
+        <View key={c.label} style={styles.box}>
+          <Text style={styles.width}>{c.label}</Text>
+          <Text
+            key={balance ? 'balanced' : 'highQuality'}
+            textBreakStrategy={balance ? 'balanced' : 'highQuality'}
+            {...c.props}
+            style={[{ color: '#111', backgroundColor: '#f6f6f6' }, c.style]}>
+            {FIT_TEXT}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // TODO(ticket 03): android compares `textBreakStrategy`. Replace with the library's
 // `Text` + `balance` prop once it exists.
 export default function App() {
@@ -101,8 +227,11 @@ function Screen() {
         <Text style={styles.barText}>
           {Platform.OS === 'android'
             ? 'textBreakStrategy: balanced'
-            : 'balance (iOS: tailIndent prototype)'}
+            : 'balance (iOS: exclusionPaths prototype)'}
         </Text>
+        <Pressable onPress={() => setBalance((b) => !b)} style={styles.toggle}>
+          <Text>{balance ? 'ON' : 'OFF'}</Text>
+        </Pressable>
         <Switch value={balance} onValueChange={setBalance} />
       </View>
       <ScrollView
@@ -110,6 +239,8 @@ function Screen() {
           styles.scroll,
           { paddingBottom: styles.scroll.padding + insets.bottom },
         ]}>
+        <HighlightProbe balance={balance} />
+        <FitProbe balance={balance} />
         <HitTestProbe balance={balance} />
         {SAMPLES.map((s) => (
           <View key={s.label} style={styles.group}>
@@ -158,4 +289,5 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   width: { fontSize: 10, color: '#999' },
+  toggle: { paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#999', borderRadius: 6 },
 });
