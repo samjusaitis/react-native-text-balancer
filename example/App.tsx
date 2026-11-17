@@ -1,6 +1,9 @@
+import * as React from 'react';
 import { useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+// PROTOTYPE (ticket 10): deep import from the bun-copied package (rsync src/ after edits).
+import { BalancedText } from 'react-native-text-balancer/src/BalancedText';
 
 // Test strings for balance behaviour: short/long, multi-line, mixed scripts, RTL, emoji.
 const SAMPLES: {
@@ -56,181 +59,165 @@ const SAMPLES: {
   },
 ];
 
-// PROTOTYPE (ticket 08): balance mode. iOS min-raggedness is flagged by the Android-only
-// android_hyphenationFrequency="full" (parsed into ParagraphAttributes on iOS, otherwise unused).
-type Mode = 'off' | 'squeeze' | 'minrag';
-const MODES: Mode[] = ['off', 'squeeze', 'minrag'];
-function modeProps(mode: Mode): object {
-  return {
-    textBreakStrategy: mode === 'off' ? 'highQuality' : 'balanced',
-    ...(Platform.OS === 'ios' && mode === 'minrag' ? { android_hyphenationFrequency: 'full' } : {}),
-  };
-}
-const COMPARE: Mode[] = Platform.OS === 'ios' ? ['squeeze', 'minrag'] : ['squeeze'];
-const MODE_LABEL: Record<Mode, string> =
-  Platform.OS === 'ios'
-    ? { off: 'off', squeeze: 'squeeze', minrag: 'min-raggedness' }
-    : { off: 'off', squeeze: 'balanced', minrag: 'balanced' };
+// PROTOTYPE (ticket 10): rows per sample/width.
+//   stock     plain RN <Text>
+//   stockFlag plain RN <Text textBreakStrategy="balanced" android_hyphenationFrequency="full">
+//             (the 04-08 swizzle flags; must render exactly like `stock` now)
+//   ours      <BalancedText balance> -> BalancedParagraph host component
+type Row = 'stock' | 'stockFlag' | 'ours';
+const ROWS: Row[] = ['stock', 'stockFlag', 'ours'];
+const ROW_LABEL: Record<Row, string> = {
+  stock: 'RN Text',
+  stockFlag: 'RN Text textBreakStrategy=balanced',
+  ours: 'BalancedParagraph',
+};
+const STOCK_FLAG = { textBreakStrategy: 'balanced', android_hyphenationFrequency: 'full' } as const;
 
 const WIDTHS = [320, 240, 180];
 
-// PROTOTYPE (ticket 04): checks hit-testing and onTextLayout agree with the balanced draw.
-function HitTestProbe({ mode }: { mode: Mode }) {
-  const [taps, setTaps] = useState(0);
-  const [lines, setLines] = useState('');
+// Count "Text strings must be rendered within a <Text>" errors (criterion 2a).
+let textStringErrors = 0;
+const origError = console.error;
+console.error = (...args: unknown[]) => {
+  if (String(args[0]).includes('Text strings must be rendered')) textStringErrors++;
+  origError(...args);
+};
+
+type Lines = Record<string, string>;
+const layoutKey = (sample: string, w: number, row: Row) => `${sample}|${w}|${row}`;
+const linesOf = (e: { nativeEvent: { lines: { text: string; width: number }[] } }) =>
+  e.nativeEvent.lines.map((l) => `${l.text.trimEnd()}@${Math.round(l.width)}`).join(' / ');
+
+function SampleText({ row, ...props }: { row: Row } & React.ComponentProps<typeof Text>) {
+  if (row === 'ours') return <BalancedText balance {...props} />;
+  return <Text {...(row === 'stockFlag' ? STOCK_FLAG : {})} {...props} />;
+}
+
+function Probe({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.group}>
-      <Text style={styles.label}>Hit-test + onTextLayout (tap the blue span)</Text>
-      <View style={styles.box}>
-        <Text
-          key={mode}
-          {...modeProps(mode)}
-          onTextLayout={(e) =>
-            setLines(e.nativeEvent.lines.map((l) => `${Math.round(l.width)}`).join(' / '))
-          }
-          style={{ width: 240, fontSize: 20, color: '#111' }}>
-          Balanced lines should still route taps to the{' '}
-          <Text style={{ color: '#06c' }} onPress={() => setTaps((t) => t + 1)}>
-            right nested span
-          </Text>{' '}
-          at the end
-        </Text>
-      </View>
-      <Text style={styles.width}>
-        taps: {taps} · line widths: {lines}
-      </Text>
+      <Text style={styles.label}>{title}</Text>
+      {children}
     </View>
   );
 }
 
-// PROTOTYPE (ticket 06): press highlight on a nested span that wraps across lines.
-// `pinned` forces the native isHighlighted attribute (normally only set while pressed) so the
-// highlight can be screenshotted; the unpinned span is the real pressable one.
-const HIGHLIGHT_CASES: {
-  label: string;
-  before: string;
-  span: string;
-  after: string;
-  textAlign?: 'center' | 'right';
-  writingDirection?: 'rtl';
-}[] = [
-  {
-    label: 'LTR',
-    before: 'Balanced lines keep the pressed',
-    span: 'nested span highlight inside the narrowed',
-    after: 'edge of the text',
-  },
-  {
-    label: 'Centred',
-    before: 'Balanced lines keep the pressed',
-    span: 'nested span highlight inside the narrowed',
-    after: 'edge of the text',
-    textAlign: 'center',
-  },
-  {
-    label: 'Right-aligned',
-    before: 'Balanced lines keep the pressed',
-    span: 'nested span highlight inside the narrowed',
-    after: 'edge of the text',
-    textAlign: 'right',
-  },
-  {
-    label: 'RTL (Arabic)',
-    before: 'تغليف النص المتوازن',
-    span: 'لتطبيقات رياكت نيتف على جميع',
-    after: 'الأجهزة والشاشات',
-  },
-  {
-    label: 'RTL writingDirection',
-    before: 'تغليف النص المتوازن',
-    span: 'لتطبيقات رياكت نيتف على جميع',
-    after: 'الأجهزة والشاشات',
-    writingDirection: 'rtl',
-  },
-];
-
-function HighlightProbe({ mode }: { mode: Mode }) {
-  const [taps, setTaps] = useState(0);
+function Pair({ render }: { render: (row: Row) => React.ReactNode }) {
   return (
-    <View style={styles.group}>
-      <Text style={styles.label}>Wrapped span highlight (orange = pinned, blue = press) · taps: {taps}</Text>
-      {HIGHLIGHT_CASES.map((c) => (
-        <View key={c.label} style={{ flexDirection: 'row', gap: 8 }}>
-          {[true, false].map((pinned) => (
-            <View key={String(pinned)} style={styles.box}>
-              <Text style={styles.width}>{c.label} 170pt</Text>
-              <Text
-                key={mode}
-          {...modeProps(mode)}
-                style={{ width: 170, fontSize: 17, color: '#111', textAlign: c.textAlign, writingDirection: c.writingDirection }}>
-                {c.before}{' '}
-                {pinned ? (
-                  <Text style={{ color: '#c60' }} {...({ isHighlighted: true } as object)}>
-                    {c.span}
-                  </Text>
-                ) : (
-                  <Text style={{ color: '#06c' }} onPress={() => setTaps((t) => t + 1)}>
-                    {c.span}
-                  </Text>
-                )}{' '}
-                {c.after}
-              </Text>
-            </View>
-          ))}
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      {(['stock', 'ours'] as Row[]).map((r) => (
+        <View key={r} style={styles.box}>
+          <Text style={styles.width}>{ROW_LABEL[r]}</Text>
+          {render(r)}
         </View>
       ))}
     </View>
   );
 }
 
-// PROTOTYPE (ticket 06): adjustsFontSizeToFit and numberOfLines interaction.
+function PressProbe() {
+  const [taps, setTaps] = useState<Record<string, number>>({});
+  const [layout, setLayout] = useState<Record<string, string>>({});
+  const tap = (k: string) => setTaps((t) => ({ ...t, [k]: (t[k] ?? 0) + 1 }));
+  return (
+    <Probe title={`Nested onPress spans + highlight · taps ${JSON.stringify(taps)}`}>
+      <Pair
+        render={(r) => (
+          <SampleText
+            row={r}
+            onTextLayout={(e) => setLayout((l) => ({ ...l, [r]: linesOf(e) }))}
+            style={{ width: 160, fontSize: 17, color: '#111' }}>
+            Balanced lines route taps to the{' '}
+            <Text style={{ color: '#06c' }} onPress={() => tap(`${r}:span`)}>
+              right nested span
+            </Text>{' '}
+            and the rest of the text
+          </SampleText>
+        )}
+      />
+      <Pair
+        render={(r) => (
+          <SampleText
+            row={r}
+            onPress={() => tap(`${r}:root`)}
+            style={{ width: 160, fontSize: 17, color: '#060' }}>
+            Whole text pressable (root onPress) wraps to lines
+          </SampleText>
+        )}
+      />
+      <Text style={styles.width}>onTextLayout stock: {layout.stock}</Text>
+      <Text style={styles.width}>onTextLayout ours: {layout.ours}</Text>
+    </Probe>
+  );
+}
+
+function MiscProbe() {
+  const [balanced, setBalanced] = useState(true);
+  return (
+    <>
+      <Probe title={`Raw string child · "Text strings" errors so far: ${textStringErrors}`}>
+        <Pair render={(r) => <SampleText row={r} style={{ width: 160, fontSize: 17 }}>Just a raw string that wraps onto lines</SampleText>} />
+      </Probe>
+      <Probe title="selectable (long-press → Copy)">
+        <Pair render={(r) => <SampleText row={r} selectable style={{ width: 160, fontSize: 17 }}>Selectable text that should offer a copy menu</SampleText>} />
+      </Probe>
+      <Probe title="Inline View attachment">
+        <Pair
+          render={(r) => (
+            <SampleText row={r} style={{ width: 160, fontSize: 17 }}>
+              Inline <View style={{ width: 24, height: 14, backgroundColor: '#c33' }} /> attachment inside wrapped text here
+            </SampleText>
+          )}
+        />
+      </Probe>
+      <Probe title="Accessibility (link span + label)">
+        <Pair
+          render={(r) => (
+            <SampleText row={r} accessibilityHint="hint" style={{ width: 160, fontSize: 17 }}>
+              Read the{' '}
+              <Text style={{ color: '#06c' }} onPress={() => {}}>
+                terms of service
+              </Text>{' '}
+              before continuing please
+            </SampleText>
+          )}
+        />
+      </Probe>
+      <Probe title="Toggle balance (remount)">
+        <Pressable onPress={() => setBalanced((b) => !b)} style={styles.toggle}>
+          <Text>balance: {String(balanced)}</Text>
+        </Pressable>
+        <BalancedText balance={balanced} style={{ width: 240, fontSize: 22, backgroundColor: '#f6f6f6' }}>
+          The quick brown fox jumps over the lazy dog while the pack watches
+        </BalancedText>
+      </Probe>
+    </>
+  );
+}
+
+// adjustsFontSizeToFit and numberOfLines (from 06), stock vs ours.
 const FIT_TEXT =
   'The quick brown fox jumps over the lazy dog while the rest of the pack watches from a distance';
 const FIT_CASES: { label: string; props: object; style: object }[] = [
-  {
-    label: 'adjustsFontSizeToFit, 240x90 box',
-    props: { adjustsFontSizeToFit: true },
-    style: { width: 240, height: 90, fontSize: 28 },
-  },
-  {
-    label: 'adjustsFontSizeToFit + numberOfLines=2, 240pt',
-    props: { adjustsFontSizeToFit: true, numberOfLines: 2 },
-    style: { width: 240, fontSize: 28 },
-  },
-  {
-    label: 'numberOfLines=2 truncates (expect no balance)',
-    props: { numberOfLines: 2 },
-    style: { width: 240, fontSize: 22 },
-  },
-  {
-    label: 'numberOfLines=5 fits (expect balance)',
-    props: { numberOfLines: 5 },
-    style: { width: 240, fontSize: 22 },
-  },
+  { label: 'adjustsFontSizeToFit, 170x90 box', props: { adjustsFontSizeToFit: true }, style: { width: 170, height: 90, fontSize: 28 } },
+  { label: 'adjustsFontSizeToFit + numberOfLines=2', props: { adjustsFontSizeToFit: true, numberOfLines: 2 }, style: { width: 170, fontSize: 28 } },
+  { label: 'numberOfLines=2 truncates (no balance)', props: { numberOfLines: 2 }, style: { width: 170, fontSize: 20 } },
+  { label: 'numberOfLines=6 fits (balance)', props: { numberOfLines: 6 }, style: { width: 170, fontSize: 20 } },
 ];
 
-function FitProbe({ mode }: { mode: Mode }) {
+function FitProbe() {
   return (
-    <View style={styles.group}>
-      <Text style={styles.label}>Font scaling + numberOfLines</Text>
+    <Probe title="Font scaling + numberOfLines">
       {FIT_CASES.map((c) => (
-        <View key={c.label} style={styles.box}>
+        <View key={c.label} style={{ gap: 2 }}>
           <Text style={styles.width}>{c.label}</Text>
-          <Text
-            key={mode}
-          {...modeProps(mode)}
-            {...c.props}
-            style={[{ color: '#111', backgroundColor: '#f6f6f6' }, c.style]}>
-            {FIT_TEXT}
-          </Text>
+          <Pair render={(r) => <SampleText row={r} {...c.props} style={[{ color: '#111', backgroundColor: '#f6f6f6' }, c.style]}>{FIT_TEXT}</SampleText>} />
         </View>
       ))}
-    </View>
+    </Probe>
   );
 }
 
-// TODO(ticket 03): android compares `textBreakStrategy`. Replace with the library's
-// `Text` + `balance` prop once it exists.
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -241,61 +228,76 @@ export default function App() {
 
 function Screen() {
   const insets = useSafeAreaInsets();
-  const [mode, setMode] = useState<Mode>('squeeze');
   const [probes, setProbes] = useState(false);
-  const rows: Mode[] = mode === 'off' ? ['off'] : COMPARE;
+  const [lines, setLines] = useState<Lines>({});
+  const record = (k: string, v: string) => setLines((l) => (l[k] === v ? l : { ...l, [k]: v }));
+  const total = SAMPLES.length * WIDTHS.length;
+  const keys = SAMPLES.flatMap((s) => WIDTHS.map((w) => [s.label, w] as const));
+  const done = keys.filter(([s, w]) => ROWS.every((r) => lines[layoutKey(s, w, r)]));
+  const same = done.filter(([s, w]) => lines[layoutKey(s, w, 'stock')] === lines[layoutKey(s, w, 'stockFlag')]);
+  React.useEffect(() => {
+    if (done.length === total) {
+      console.log(`[iso] stock==flagged ${same.length}/${total}`);
+      for (const [s, w] of keys) {
+        console.log(`[iso] ${s} ${w} stock: ${lines[layoutKey(s, w, 'stock')]}`);
+        console.log(`[iso] ${s} ${w} ours : ${lines[layoutKey(s, w, 'ours')]}`);
+      }
+    }
+  }, [done.length]);
 
   return (
     <View style={styles.container}>
       <View style={[styles.bar, { paddingTop: styles.bar.padding + insets.top }]}>
-        <Text style={styles.barText}>
-          {Platform.OS === 'android' ? 'textBreakStrategy' : 'iOS 08: squeeze vs min-rag'}
-        </Text>
-        <Pressable
-          onPress={() => setMode((m) => (m === 'off' ? 'squeeze' : 'off'))}
-          style={styles.toggle}>
-          <Text>{mode === 'off' ? 'OFF' : 'ON'}</Text>
-        </Pressable>
+        <Text style={styles.barText}>iOS 10: own paragraph component</Text>
         <Pressable onPress={() => setProbes((p) => !p)} style={styles.toggle}>
-          <Text>probes: {probes ? (mode === 'off' ? 'off' : 'min-rag') : 'hidden'}</Text>
+          <Text>{probes ? 'samples' : 'probes'}</Text>
         </Pressable>
       </View>
       <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingBottom: styles.scroll.padding + insets.bottom },
-        ]}>
-        {probes && <HighlightProbe mode={mode === 'off' ? 'off' : 'minrag'} />}
-        {probes && <FitProbe mode={mode === 'off' ? 'off' : 'minrag'} />}
-        {probes && <HitTestProbe mode={mode === 'off' ? 'off' : 'minrag'} />}
-        {SAMPLES.map((s) => (
-          <View key={s.label} style={styles.group}>
-            <Text style={styles.label}>{s.label}</Text>
-            {WIDTHS.map((w) => (
-              <View key={w} style={{ gap: 4 }}>
-                {rows.map((m) => (
-                  <View key={m} style={styles.box}>
+        contentContainerStyle={[styles.scroll, { paddingBottom: styles.scroll.padding + insets.bottom }]}>
+        <Text style={styles.label}>
+          isolation: stock == flagged stock in {same.length}/{done.length} (of {total})
+        </Text>
+        {probes && <PressProbe />}
+        {probes && <MiscProbe />}
+        {probes && <FitProbe />}
+        {!probes &&
+          SAMPLES.map((s) => (
+            <View key={s.label} style={styles.group}>
+              <Text style={styles.label}>{s.label}</Text>
+              {WIDTHS.map((w) => {
+                const a = lines[layoutKey(s.label, w, 'stock')];
+                const b = lines[layoutKey(s.label, w, 'stockFlag')];
+                const c = lines[layoutKey(s.label, w, 'ours')];
+                return (
+                  <View key={w} style={{ gap: 4 }}>
                     <Text style={styles.width}>
-                      {w}pt · {MODE_LABEL[m]}
+                      {w}pt · stock vs flagged stock: {a && b ? (a === b ? 'IDENTICAL' : 'DIFFERENT') : '…'} · ours{' '}
+                      {a && c ? (a === c ? 'same as stock' : 'balanced') : '…'}
                     </Text>
-                    <Text
-                      {...modeProps(m)}
-                      style={{
-                        width: w,
-                        fontSize: s.fontSize,
-                        fontFamily: s.fontFamily,
-                        textAlign: s.textAlign,
-                        color: '#111',
-                        backgroundColor: m === 'minrag' ? '#eef6ff' : '#f6f6f6',
-                      }}>
-                      {s.text}
-                    </Text>
+                    {ROWS.map((r) => (
+                      <View key={r} style={styles.box}>
+                        <Text style={styles.width}>{ROW_LABEL[r]}</Text>
+                        <SampleText
+                          row={r}
+                          onTextLayout={(e) => record(layoutKey(s.label, w, r), linesOf(e))}
+                          style={{
+                            width: w,
+                            fontSize: s.fontSize,
+                            fontFamily: s.fontFamily,
+                            textAlign: s.textAlign,
+                            color: '#111',
+                            backgroundColor: r === 'ours' ? '#eef6ff' : '#f6f6f6',
+                          }}>
+                          {s.text}
+                        </SampleText>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
-            ))}
-          </View>
-        ))}
+                );
+              })}
+            </View>
+          ))}
       </ScrollView>
     </View>
   );

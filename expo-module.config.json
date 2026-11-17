@@ -1,9 +1,17 @@
 {
-  "platforms": ["apple", "android"],
+  "platforms": [
+    "apple",
+    "android"
+  ],
   "apple": {
-    "modules": ["ReactNativeTextBalancerModule"]
+    "modules": [
+      "ReactNativeTextBalancerModule"
+    ],
+    "podspecPath": "ReactNativeTextBalancer.podspec"
   },
   "android": {
-    "modules": ["expo.modules.textbalancer.ReactNativeTextBalancerModule"]
+    "modules": [
+      "expo.modules.textbalancer.ReactNativeTextBalancerModule"
+    ]
   }
 }

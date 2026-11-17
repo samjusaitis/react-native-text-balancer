@@ -41,5 +41,17 @@
     "expo": "*",
     "react": "*",
     "react-native": "*"
+  },
+  "codegenConfig": {
+    "name": "ReactNativeTextBalancerSpec",
+    "type": "components",
+    "jsSrcsDir": "src",
+    "ios": {
+      "components": {
+        "BalancedParagraph": {
+          "className": "RCTBalancedParagraphComponentView"
+        }
+      }
+    }
   }
 }

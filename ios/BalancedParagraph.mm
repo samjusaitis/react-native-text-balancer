@@ -1,43 +1,43 @@
-// PROTOTYPE (tickets 04 + 06 + 08, iOS balance injection spike). Throwaway, do not ship as-is.
+// PROTOTYPE (ticket 10): iOS balancing via the library's own Fabric paragraph component. Throwaway.
 //
-// Ticket 08 adds a second mode, MINIMUM RAGGEDNESS, flagged per Text by
-// android_hyphenationFrequency="full" (Android-only prop, parsed on iOS, otherwise ignored).
-// Per paragraph: keep the full-width line count k, measure word-boundary x offsets once with a
-// one-line CTLine, pick the k-line break plan minimising sum((U - w_i)^2) (= line-width
-// variance), then impose it with an NSTextContainer subclass that returns a per-line fragment
-// width keyed by the line's start character index. The resulting breaks are verified against
-// the plan; on mismatch it falls back to the squeeze.
+// Question: does a codegen host component `BalancedParagraph`, built from subclasses of RN's
+// paragraph classes, balance end to end while RN's own <Text> stays untouched (no swizzle)?
 //
-// Question (06): does narrowing with NSTextContainer.exclusionPaths, applied after RN's
-// scaleFontSizeToFitSize:, fix 04's trade-offs (press highlight overflowing to the box edge,
-// no adjustsFontSizeToFit) while measure, draw, hit-test and onTextLayout still agree?
+//   BalancedParagraphShadowNode      : ParagraphShadowNode   (hides Name()/Handle() -> "BalancedParagraph")
+//   BalancedTextLayoutManager        : TextLayoutManager     (swaps protected nativeTextLayoutManager_)
+//   RCTBalancedTextLayoutManager     : RCTTextLayoutManager  (overrides the private stack builder; calls
+//                                                             super, then imposes the ticket 08 plan)
+//   BalancedParagraphComponentDescriptor (own TextLayoutManager instance -> own measure cache)
+//   RCTBalancedParagraphComponentView : RCTParagraphComponentView (registered via codegenConfig)
 //
-// Approach: every one of those paths builds its TextKit 1 stack through the private
-// -[RCTTextLayoutManager _textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:].
-// We swizzle it. When paragraphAttributes.textBreakStrategy == Balanced (the existing,
-// Android-only prop, which is still parsed into ParagraphAttributes on iOS), we call the
-// original first (so any font scaling has already happened), then binary-search the
-// narrowest exclusion strip on RN's own container that keeps the full-width line count.
-// The strip sits on the trailing side (left for right-aligned / RTL text), or half on each
-// side for centred text. The container (and so the Yoga box) stays full width, like CSS
-// `text-wrap: balance`; the line fragment rects shrink, so selection/highlight rects do too.
+// Min-raggedness code below is ported verbatim from ticket 08 (PrototypeBalanceSwizzle.mm), minus the
+// squeeze: on a plan mismatch RN's container is put back (stock wrapping).
+//
+// Prototype-only debug hooks:
+//   - launch arg `-TBSimulateMissingSelector YES` makes the runtime guard look for a bogus selector
+//     (simulates RN renaming the private builder).
+//   - `xcrun simctl spawn <udid> notifyutil -p tb.dumpa11y` dumps every paragraph view's accessibility
+//     elements to os_log (stock Paragraph and BalancedParagraph side by side).
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
+#import <notify.h>
 #import <os/log.h>
 
 #import <CoreText/CoreText.h>
-#import <react/renderer/attributedstring/ParagraphAttributes.h>
 
+#import <React/RCTLog.h>
+#import <React/RCTParagraphComponentView.h>
+#import <react/renderer/components/text/ParagraphShadowNode.h>
+#import <react/renderer/core/ConcreteComponentDescriptor.h>
+#import <react/renderer/textlayoutmanager/RCTTextLayoutManager.h>
+#import <react/renderer/textlayoutmanager/TextLayoutManager.h>
+#import <react/utils/ManagedObjectWrapper.h>
+
+#include <algorithm>
 #include <vector>
 
-using facebook::react::HyphenationFrequency;
-using facebook::react::ParagraphAttributes;
-using facebook::react::TextBreakStrategy;
-
-typedef NSTextStorage *(*BuildIMP)(id, SEL, NSAttributedString *, ParagraphAttributes, CGSize);
-static BuildIMP gOriginal = nullptr;
+using namespace facebook::react;
 
 static const CGFloat kStripHeight = 1e7; // finite stand-in for measure's CGFLOAT_MAX height
 
@@ -300,19 +300,54 @@ static NSTextContainer *applyMinRaggedness(
 
 // -------------------------------------------------------------------------------------------
 
-static NSUInteger gCalls[2] = {0, 0};
-static double gTotalMs[2] = {0, 0};
+// ---- Ticket 10: RCTTextLayoutManager subclass (no swizzle) --------------------------------
 
-static NSTextStorage *balancedBuild(
-    id self,
-    SEL _cmd,
-    NSAttributedString *string,
-    ParagraphAttributes paragraphAttributes,
-    CGSize size)
+static NSString *const kBuilderSelectorName = @"_textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:";
+
+// Private RN API, declared so `super` can be called. Only ever invoked by RN itself via `self`,
+// so if RN renames it our override is simply never called (stock layout).
+@interface RCTTextLayoutManager (TBPrivate)
+- (NSTextStorage *)_textStorageAndLayoutManagerWithAttributesString:(NSAttributedString *)attributedString
+                                                paragraphAttributes:(ParagraphAttributes)paragraphAttributes
+                                                               size:(CGSize)size;
+@end
+
+@interface RCTBalancedTextLayoutManager : RCTTextLayoutManager
+@end
+
+static BOOL gHookAvailable = NO;
+static std::vector<double> gSamples;
+
+@implementation RCTBalancedTextLayoutManager
+
++ (void)initialize
 {
-  NSTextStorage *storage = gOriginal(self, _cmd, string, paragraphAttributes, size);
-  if (paragraphAttributes.textBreakStrategy != TextBreakStrategy::Balanced || storage.length == 0 ||
-      !isfinite(size.width) || size.width <= 0 || size.width > 100000) {
+  if (self != [RCTBalancedTextLayoutManager class]) {
+    return;
+  }
+  NSString *name = kBuilderSelectorName;
+  if ([[NSUserDefaults standardUserDefaults] boolForKey:@"TBSimulateMissingSelector"]) {
+    name = @"_textStorageAndLayoutManagerWithAttributedString_RENAMED:paragraphAttributes:size:";
+  }
+  gHookAvailable = [RCTTextLayoutManager instancesRespondToSelector:NSSelectorFromString(name)];
+  os_log(OS_LOG_DEFAULT, "[TextBalancer prototype] hook available=%d", gHookAvailable);
+#if RCT_DEV
+  if (!gHookAvailable) {
+    RCTLogWarn(
+        @"react-native-text-balancer: RCTTextLayoutManager no longer responds to %@; <Text balance> renders unbalanced on this React Native version.",
+        name);
+  }
+#endif
+}
+
+- (NSTextStorage *)_textStorageAndLayoutManagerWithAttributesString:(NSAttributedString *)attributedString
+                                                paragraphAttributes:(ParagraphAttributes)paragraphAttributes
+                                                               size:(CGSize)size
+{
+  NSTextStorage *storage = [super _textStorageAndLayoutManagerWithAttributesString:attributedString
+                                                                paragraphAttributes:paragraphAttributes
+                                                                               size:size];
+  if (!gHookAvailable || storage.length == 0 || !isfinite(size.width) || size.width <= 0 || size.width > 100000) {
     return storage;
   }
 
@@ -321,8 +356,6 @@ static NSTextStorage *balancedBuild(
   NSTextContainer *container = layoutManager.textContainers.firstObject;
   CGFloat W = size.width;
 
-  // Count on RN's own stack (already font-scaled), but untruncated and unbounded in height,
-  // so a narrower strip shows up as an extra line rather than as truncation or clipping.
   CGSize savedSize = container.size;
   NSUInteger savedMaxLines = container.maximumNumberOfLines;
   NSLineBreakMode savedMode = container.lineBreakMode;
@@ -335,8 +368,6 @@ static NSTextStorage *balancedBuild(
   NSUInteger maxLines = paragraphAttributes.maximumNumberOfLines;
   BOOL truncated = maxLines > 0 && target > maxLines;
 
-  // Which side the strip goes on: explicit centre → both; otherwise look at where the
-  // shortest full-width line sits (covers right alignment and RTL natural alignment).
   NSParagraphStyle *style = [storage attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:nil];
   StripSide side = StripRight;
   if (style.alignment == NSTextAlignmentCenter) {
@@ -345,81 +376,149 @@ static NSTextStorage *balancedBuild(
     side = StripLeft;
   }
 
-  BOOL minRag = paragraphAttributes.android_hyphenationFrequency == HyphenationFrequency::Full;
   NSString *planInfo = @"-";
-  if (minRag && !truncated && target > 1) {
+  NSTextContainer *active = container;
+  if (!truncated && target > 1) {
     NSString *info = nil;
     NSTextContainer *plan = applyMinRaggedness(storage, layoutManager, container, side, &info);
     planInfo = info;
     if (plan != nil) {
-      plan.size = savedSize;
-      plan.maximumNumberOfLines = savedMaxLines;
-      plan.lineBreakMode = savedMode;
-      container = nil;
+      active = plan;
     }
   }
-
-  CGFloat inset = 0;
-  if (container != nil && !truncated && target > 1) {
-    CGFloat lo = 0, hi = W - W / target; // inset range; lines can't average narrower than W/target
-    while (hi - lo > 0.5) {
-      CGFloat mid = (lo + hi) / 2;
-      container.exclusionPaths = strips(W, mid, side);
-      if (countLines(layoutManager, container, nullptr) <= target) {
-        lo = mid;
-      } else {
-        hi = mid;
-      }
-    }
-    inset = lo;
-  }
-
-  if (container != nil) {
-    container.size = savedSize;
-    container.maximumNumberOfLines = savedMaxLines;
-    container.lineBreakMode = savedMode;
-    container.exclusionPaths = inset > 0.5 ? strips(W, inset, side) : @[];
-  }
+  active.size = savedSize;
+  active.maximumNumberOfLines = savedMaxLines;
+  active.lineBreakMode = savedMode;
 
   double ms = (CFAbsoluteTimeGetCurrent() - start) * 1000;
-  int mode = minRag ? 1 : 0;
-  gCalls[mode]++;
-  gTotalMs[mode] += ms;
+  gSamples.push_back(ms);
+  std::vector<double> sorted = gSamples;
+  std::sort(sorted.begin(), sorted.end());
   os_log(
       OS_LOG_DEFAULT,
-      "[TextBalancer prototype] mode=%{public}s w=%.1f h=%.1f lines=%lu maxLines=%lu truncated=%d side=%ld scaled=%d inset=%.1f plan=%{public}@ %.3fms (avg %.3fms over %lu calls)",
-      minRag ? "minrag" : "squeeze",
+      "[TextBalancer prototype] balanced w=%.1f lines=%lu maxLines=%lu truncated=%d scaled=%d plan=%{public}@ %.3fms (median %.3fms n=%lu)",
       W,
-      size.height,
       (unsigned long)target,
       (unsigned long)maxLines,
       truncated,
-      (long)side,
       paragraphAttributes.adjustsFontSizeToFit,
-      inset,
       planInfo,
       ms,
-      gTotalMs[mode] / gCalls[mode],
-      (unsigned long)gCalls[mode]);
+      sorted[sorted.size() / 2],
+      (unsigned long)sorted.size());
   return storage;
 }
 
-@interface PrototypeTextBalancerSwizzle : NSObject
 @end
 
-@implementation PrototypeTextBalancerSwizzle
+// ---- Ticket 10: C++ side -----------------------------------------------------------------
 
-+ (void)load
-{
-  Class cls = NSClassFromString(@"RCTTextLayoutManager");
-  SEL sel = NSSelectorFromString(@"_textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:");
-  Method method = cls ? class_getInstanceMethod(cls, sel) : nullptr;
-  if (method == nullptr) {
-    os_log_error(OS_LOG_DEFAULT, "[TextBalancer prototype] RCTTextLayoutManager hook not found");
-    return;
+namespace facebook::react {
+
+extern const char BalancedParagraphComponentName[] = "BalancedParagraph";
+
+class BalancedParagraphShadowNode : public ParagraphShadowNode {
+ public:
+  using ParagraphShadowNode::ParagraphShadowNode;
+
+  // Hide ConcreteShadowNode's statics so the descriptor registers "BalancedParagraph".
+  static ComponentName Name()
+  {
+    return ComponentName(BalancedParagraphComponentName);
   }
-  gOriginal = (BuildIMP)method_setImplementation(method, (IMP)balancedBuild);
-  os_log(OS_LOG_DEFAULT, "[TextBalancer prototype] swizzled RCTTextLayoutManager (exclusionPaths)");
+  static ComponentHandle Handle()
+  {
+    return ComponentHandle(BalancedParagraphComponentName);
+  }
+};
+
+class BalancedTextLayoutManager : public TextLayoutManager {
+ public:
+  explicit BalancedTextLayoutManager(const std::shared_ptr<const ContextContainer> &contextContainer)
+      : TextLayoutManager(contextContainer)
+  {
+    nativeTextLayoutManager_ = wrapManagedObject([RCTBalancedTextLayoutManager new]);
+  }
+};
+
+// Modelled on BaseParagraphComponentDescriptor, but with our own TextLayoutManager instance
+// (own native manager, own measure caches), never the shared TextLayoutManagerKey one.
+class BalancedParagraphComponentDescriptor final : public ConcreteComponentDescriptor<BalancedParagraphShadowNode> {
+ public:
+  explicit BalancedParagraphComponentDescriptor(const ComponentDescriptorParameters &parameters)
+      : ConcreteComponentDescriptor<BalancedParagraphShadowNode>(parameters),
+        textLayoutManager_(std::make_shared<BalancedTextLayoutManager>(contextContainer_))
+  {
+  }
+
+ protected:
+  void adopt(ShadowNode &shadowNode) const override
+  {
+    ConcreteComponentDescriptor<BalancedParagraphShadowNode>::adopt(shadowNode);
+    static_cast<BalancedParagraphShadowNode &>(shadowNode).setTextLayoutManager(textLayoutManager_);
+  }
+
+ private:
+  const std::shared_ptr<const TextLayoutManager> textLayoutManager_;
+};
+
+} // namespace facebook::react
+
+// ---- Ticket 10: view -----------------------------------------------------------------------
+
+@interface RCTBalancedParagraphComponentView : RCTParagraphComponentView
+@end
+
+@implementation RCTBalancedParagraphComponentView
+
++ (ComponentDescriptorProvider)componentDescriptorProvider
+{
+  return concreteComponentDescriptorProvider<BalancedParagraphComponentDescriptor>();
 }
 
 @end
+
+// ---- Prototype-only: accessibility dump ----------------------------------------------------
+
+static void dumpA11y(UIView *view, NSMutableString *out)
+{
+  if ([view isKindOfClass:[RCTParagraphComponentView class]]) {
+    CGRect f = [view convertRect:view.bounds toView:nil];
+    [out appendFormat:@"\n%@ frame=%@ isElement=%d label=%@ traits=%llu",
+                      NSStringFromClass(view.class),
+                      NSStringFromCGRect(f),
+                      view.isAccessibilityElement,
+                      view.accessibilityLabel,
+                      (unsigned long long)view.accessibilityTraits];
+    for (id el in view.accessibilityElements) {
+      UIAccessibilityElement *e = el;
+      [out appendFormat:@"\n    el label=%@ traits=%llu frame=%@ isElement=%d",
+                        e.accessibilityLabel,
+                        (unsigned long long)e.accessibilityTraits,
+                        NSStringFromCGRect(e.accessibilityFrame),
+                        e.isAccessibilityElement];
+    }
+    return;
+  }
+  for (UIView *sub in view.subviews) {
+    dumpA11y(sub, out);
+  }
+}
+
+__attribute__((constructor)) static void TBRegisterA11yDump(void)
+{
+  int token;
+  notify_register_dispatch("tb.dumpa11y", &token, dispatch_get_main_queue(), ^(int) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+      for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+        NSMutableString *out = [NSMutableString new];
+        dumpA11y(window, out);
+        for (NSString *chunk in [out componentsSeparatedByString:@"\n"]) {
+          if (chunk.length) {
+            os_log(OS_LOG_DEFAULT, "[TextBalancer a11y] %{public}@", chunk);
+          }
+        }
+      }
+    }
+  });
+}
