@@ -19,7 +19,7 @@ How should the library ship the iOS balancing hook that tickets 04–06 proved o
 
 ## Answer
 
-**iOS ships as the library's own Fabric component built from subclasses of RN's paragraph classes, with no swizzle and no patch to RN.** Sam's decisions, 2026-11-17. RN's own `Text` is never modified, not even by an invisible, gated hook. Recorded in [ADR 0001](../../../docs/adr/0001-ios-own-paragraph-component.md).
+**iOS ships as the library's own Fabric component built from subclasses of RN's paragraph classes, with no swizzle and no patch to RN.** Sam's decisions, 2026-11-17. RN's own `Text` is never modified, not even by an invisible, gated hook. Recorded in [ADR 0001](../../../docs/adr/0001-ios-polyfill-swizzle.md).
 
 - **Mechanism:**
   - The shadow node subclasses `ParagraphShadowNode` and owns its own `TextLayoutManager`. That subclass replaces the protected `nativeTextLayoutManager_` with an `RCTTextLayoutManager` subclass.
@@ -33,11 +33,11 @@ How should the library ship the iOS balancing hook that tickets 04–06 proved o
   - Toggling `balance` on iOS remounts (the component type changes).
 - **Algorithm:** min-raggedness only. On a break-plan mismatch (hyphens, CJK, bidi) it falls back to stock wrapping; the squeeze is dropped.
 - **Supported range:** RN ≥ 0.85 (Expo SDK 56+), to be confirmed by ticket 10's header diff.
-  - CI builds against each supported Expo SDK's RN plus the next RC.
-  - `peerDependencies` has no upper bound; CI is the gate.
+  - A local `verify:matrix` run builds against each supported RN minor plus the next RC (per RN minor, not per Expo SDK; see [13](13-packaging-tooling-grilling.md)).
+  - `peerDependencies` has no upper bound; the `verify:matrix` run is the gate.
   - Use `#if` on RN's version macros wherever the C++ APIs differ between minors.
 - **Failure modes:**
-  - C++ API drift is a compile error, caught in CI.
+  - C++ API drift is a compile error, caught by the `verify:matrix` run.
   - If `RCTTextLayoutManager` stops responding to the private selector (checked once at runtime), the override is never called. Our component then lays out as stock and warns once in dev, with no crash and nothing in release.
 - **No upstream RN work** and no "future" note. If RN ships a native balance style, this package becomes obsolete and is deprecated.
 

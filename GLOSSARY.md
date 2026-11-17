@@ -1,6 +1,6 @@
 # react-native-text-balancer
 
-A drop-in React Native `Text` whose `balance` prop evens out line lengths, like CSS `text-wrap: balance`.
+An iOS polyfill that makes React Native's `textBreakStrategy="balanced"` even out line lengths on iOS as it does on Android, like CSS `text-wrap: balance`.
 
 ## Language
 
@@ -13,9 +13,9 @@ Line breaks exactly as React Native's own `Text` would lay them out.
 _Avoid_: Default layout, unbalanced layout
 
 **Fallback**:
-A paragraph that `balance` can't balance and therefore renders with stock wrapping, without any error.
+A paragraph set to `textBreakStrategy="balanced"` that iOS can't balance, so it renders with stock wrapping and no error.
 _Avoid_: Failure, degradation
 
 **Outermost Text**:
-The `Text` that isn't nested inside another `Text`; the only one where `balance` applies.
+The `Text` that isn't nested inside another `Text`. It's the only one whose `textBreakStrategy` React Native reads, so it's the only one that can balance.
 _Avoid_: Root span, parent text
