@@ -23,5 +23,5 @@ How should the library be delivered? The current route is a published package wi
 What this supersedes:
 - [09](09-ios-hook-delivery-grilling.md): the own-component decision and the `balance` prop.
 - [10](10-ios-own-paragraph-component-prototype.md): its component, though the RN-range finding still holds.
-- [12](12-public-api-semantics-grilling.md): replaced by "the prop is RN's own". Fallback and best-effort semantics carry over. The `lineBreakStrategyIOS` push-out still skips balancing, now without a wrapper-level warning.
+- [12](12-public-api-semantics-grilling.md): replaced by "the prop is RN's own". Fallback and best-effort semantics carry over. `push-out` is removed only on paragraphs the plan balances, and restored on fallback, with no warning (Sam, 2026-11-18; see 12's amended `lineBreakStrategyIOS` rule). It doesn't make a paragraph skip balancing.
 - [13](13-packaging-tooling-grilling.md): the codegen, bob, `resolveText` and npm `files` parts.
