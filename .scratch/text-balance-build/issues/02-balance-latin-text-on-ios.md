@@ -14,9 +14,17 @@ Spec: [spec.md](../../text-balance/spec.md) (The iOS hook; Planning one paragrap
 
 **Blocked by:** 01.
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] The Latin headline samples (left, centred, right, RTL) and the multi-paragraph sample show ✅ "balanced" on iOS. Their "unchanged" twins show ✅.
-- [ ] Making the guard's checks fail on purpose (for example, a renamed selector) gives stock layout on every sample and exactly one dev warning.
+- [x] The Latin headline samples (left, centred, right, RTL) and the multi-paragraph sample show ✅ "balanced" on iOS. Their "unchanged" twins show ✅.
+- [x] Making the guard's checks fail on purpose (for example, a renamed selector) gives stock layout on every sample and exactly one dev warning.
 - [ ] Nested pressable spans fire `onPress` and their highlight hugs the balanced lines. `selectable`, VoiceOver and `onTextLayout` behave as stock (checked by eye on the test screen).
-- [ ] Measure, draw, hit-test and `onTextLayout` agree: no clipped or overlapping text on any sample.
+- [x] Measure, draw, hit-test and `onTextLayout` agree: no clipped or overlapping text on any sample.
+
+## Comments
+
+- **Implementation:** `ios/RNTextBalancer.mm` (guard, `#error` floor, swizzle) and `ios/RNTBBalancer.{h,mm}` (plan, per-line container, check, per-paragraph fallback). Simulator, RN 0.88.1: 12/12, including a new "Nested pressable spans, selectable" sample. A renamed selector and a changed expected signature each gave stock layout on every sample plus exactly one dev warning.
+- **Widths:** caret offsets (`CTLineGetOffsetForStringIndex`, as in prototype 08) return 0 for the end of an RTL-based line, so the RTL sample never planned. Widths use logical-order `CTRun` advances from the same `CTLine`, prefix-summed, as the spec says.
+- **Still to check by eye:** tapping a nested span in the balanced copy fires `onPress`, and `selectable` works. The press highlight hugging the lines and VoiceOver weren't checked, so box 3 stays open.
+- **Open question:** RN measures with `usedRectForTextContainer`, so a `Text` *without* a fixed width measures at its widest balanced line, narrower than stock. Draw then replans at that width. The line count stays k, because greedy wrapping at a width the k balanced lines fit in can't need more lines, so nothing clips. But that box isn't "the stock size". Every sample uses a fixed width.
+- **Early from 04:** text that truncates at `numberOfLines` is left as stock, so truncation can't break.

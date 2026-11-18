@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, type TextLayoutEvent, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -72,6 +72,7 @@ function SampleCard({
   onResult: (key: 'unchanged' | 'expected', result: Result) => void;
 }) {
   const [lines, setLines] = useState<Partial<Record<Rendering, Line[]>>>({});
+  const [pressed, setPressed] = useState<string>();
 
   const onLayout = (rendering: Rendering) => (e: TextLayoutEvent) => {
     const next = e.nativeEvent.lines.map((l) => ({
@@ -93,6 +94,8 @@ function SampleCard({
   }, [expected?.pass, expected?.detail]);
 
   const textStyle = [styles.text, sample.style, { width: sample.width }];
+  const content = (variant: number) =>
+    withLinks(distinct(sample.text, variant), sample.links, (link) => setPressed(link));
 
   return (
     <View style={styles.card}>
@@ -104,26 +107,55 @@ function SampleCard({
 
       <Text style={styles.caption}>stock</Text>
       <View style={styles.box}>
-        <Text style={textStyle} onTextLayout={onLayout('stock')}>
-          {distinct(sample.text, 0)}
+        <Text style={textStyle} {...sample.props} onTextLayout={onLayout('stock')}>
+          {content(0)}
         </Text>
       </View>
 
       <Text style={styles.caption}>textBreakStrategy="balanced"</Text>
       <View style={styles.box}>
-        <Text style={textStyle} textBreakStrategy="balanced" onTextLayout={onLayout('test')}>
-          {distinct(sample.text, 1)}
+        <Text
+          style={textStyle}
+          {...sample.props}
+          textBreakStrategy="balanced"
+          onTextLayout={onLayout('test')}>
+          {content(1)}
         </Text>
       </View>
+      {sample.links && <Text style={styles.caption}>last press: {pressed ?? 'none'}</Text>}
 
       {/* The unchanged twin: hidden from view, but still laid out so onTextLayout fires. */}
       <View style={styles.hidden} pointerEvents="none">
-        <Text style={textStyle} textBreakStrategy="highQuality" onTextLayout={onLayout('twin')}>
-          {distinct(sample.text, 2)}
+        <Text
+          style={textStyle}
+          {...sample.props}
+          textBreakStrategy="highQuality"
+          onTextLayout={onLayout('twin')}>
+          {content(2)}
         </Text>
       </View>
     </View>
   );
+}
+
+// Splits `text` so each of `links` becomes a nested pressable span.
+function withLinks(text: string, links: string[] | undefined, onPress: (link: string) => void) {
+  if (!links?.length) return text;
+  const parts: ReactNode[] = [];
+  let rest = text;
+  for (const link of links) {
+    const at = rest.indexOf(link);
+    if (at < 0) continue;
+    parts.push(rest.slice(0, at));
+    parts.push(
+      <Text key={link} style={styles.link} onPress={() => onPress(link)}>
+        {link}
+      </Text>
+    );
+    rest = rest.slice(at + link.length);
+  }
+  parts.push(rest);
+  return parts;
 }
 
 function Badge({ name, result }: { name: Expectation; result?: Result }) {
@@ -158,5 +190,6 @@ const styles = StyleSheet.create({
     borderColor: '#bbb',
   },
   text: { color: '#111' },
+  link: { color: '#06c', textDecorationLine: 'underline' },
   hidden: { position: 'absolute', opacity: 0, left: 12, top: 12 },
 });

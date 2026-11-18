@@ -1,4 +1,4 @@
-import type { TextStyle } from 'react-native';
+import type { TextProps, TextStyle } from 'react-native';
 
 import type { Expectation } from './checks';
 
@@ -13,6 +13,11 @@ export type Sample = {
   width: number;
   expect: Exclude<Expectation, 'unchanged'>;
   style?: TextStyle;
+  // Extra props for every rendering of the sample (for example `selectable`).
+  props?: TextProps;
+  // Substrings of `text` rendered as nested pressable spans, for checking taps and the press
+  // highlight by eye.
+  links?: string[];
 };
 
 export const SAMPLES: Sample[] = [
@@ -57,5 +62,15 @@ export const SAMPLES: Sample[] = [
     width: 220,
     expect: 'balanced',
     style: { fontSize: 16 },
+  },
+  {
+    id: 'pressable-spans',
+    label: 'Nested pressable spans, selectable',
+    text: 'Tap the linked words in this headline to check that presses still land on balanced lines',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 22 },
+    props: { selectable: true },
+    links: ['linked words', 'presses still land'],
   },
 ];
