@@ -43,11 +43,6 @@ android.iml
 /example/ios/
 /example/android/
 
-# Library build output (compiled TypeScript; rebuilt by `prepare`)
-#
-/build/
-*.tsbuildinfo
-
 # node.js
 #
 node_modules/

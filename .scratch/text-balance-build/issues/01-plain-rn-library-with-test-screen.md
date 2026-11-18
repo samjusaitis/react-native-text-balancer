@@ -28,3 +28,7 @@ Spec: [spec.md](../../text-balance/spec.md). Decisions: [ADR 0001](../../../docs
 - [ ] The `sync` script plus a rebuild picks up native edits in the example app.
 - [ ] The test screen runs on iOS. The "unchanged" samples show ✅, and the "balanced" samples show ❌ because nothing balances yet.
 - [ ] On Android, the "balanced" samples show ✅ through RN's native `balanced`.
+
+## Comments
+
+- **Linking changed (implementation):** bun's `file:..` install ignores the `files` allowlist and copied the whole repo into the example's `node_modules`, example builds included, recursively (7.9 GB). The example now links the library by path through its own RN CLI config (dependency `root` set to the repo root), as RN library templates do. There's no dependency entry, no install copy and no `sync` script, and a native rebuild picks up library edits directly. Expo autolinking links it on iOS and skips it on Android. The spec's Example app line is updated to match.

@@ -5,8 +5,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "ios": { "bundleIdentifier": "com.codefish.textbalancerexample" },
-    "android": { "package": "com.codefish.textbalancerexample" },
-    "experiments": { "autolinkingModuleResolution": true }
+    "ios": {
+      "bundleIdentifier": "com.codefish.textbalancerexample"
+    },
+    "android": {
+      "package": "com.codefish.textbalancerexample"
+    }
   }
 }

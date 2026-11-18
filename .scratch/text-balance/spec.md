@@ -93,16 +93,16 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 
 **API contract:** none beyond RN's own. `textBreakStrategy` is already typed on every platform through RN's `TextProps`. Only the outermost `Text`'s value is read; nested spans are ignored, as in stock RN.
 
-**Example app:** keeps its Expo dev-client setup and its `file:..` dependency, plus a `sync` script that copies the package's iOS sources, podspec and `package.json` into the app's `node_modules`. Its main screen becomes the self-checking test screen (see Testing).
+**Example app:** keeps its Expo dev-client setup. It links the library straight from the repo root through its own RN CLI config (a dependency `root`), with no install copy or sync step, so a native rebuild picks up library edits. (Build ticket 01 replaced the planned `file:..` copy plus `sync` script, because bun's `file:` install copied the whole repo, example builds included.) Its main screen becomes the self-checking test screen (see Testing).
 
 ## Testing Decisions
 
 - **One behaviour seam:** RN's own `Text` with `textBreakStrategy="balanced"`, observed through `onTextLayout`, in the example app's self-checking test screen.
-  - Each sample renders twice, stock and balanced, at fixed widths. The screen compares the lines and shows ✅ or ❌ per sample.
+  - Each sample renders three times at a fixed width: stock (no `textBreakStrategy`), balanced, and a hidden twin with a non-balanced strategy (`highQuality`). The screen compares the lines and shows ✅ or ❌ per check.
   - A sample's expectation is one of:
     - balanced: same line count as stock, and the line widths vary less than stock's;
     - stock: identical lines to the stock render, for fallback cases;
-    - unchanged: a plain `Text` with the same string renders identically to stock.
+    - unchanged: checked for every sample, the twin renders identically to stock, so the hook leaves every non-balanced `Text` alone.
   - A human reads it on the iOS simulator, and on an Android emulator to check native `balanced`. There's no UI automation.
 - **Good tests check external behaviour only:** the lines RN reports and what's drawn, never the plan, the DP or the cache directly.
 - **Sample set**, from tickets 06, 08, 10 and 14:

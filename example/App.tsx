@@ -1,88 +1,14 @@
-import { useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, type TextLayoutEvent, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Test strings for balance behaviour: short/long, multi-line, mixed scripts, RTL, emoji.
-const SAMPLES: {
-  label: string;
-  text: string;
-  fontSize?: number;
-  fontFamily?: string;
-  textAlign?: 'center';
-}[] = [
-  {
-    label: 'Centred headline',
-    text: 'Balanced text wrapping keeps centred headlines tidy',
-    fontSize: 26,
-    textAlign: 'center',
-  },
-  { label: 'Short headline', text: 'Balanced text wrapping for React Native', fontSize: 28 },
-  {
-    label: 'Long headline',
-    text: 'The quick brown fox jumps over the lazy dog while the rest of the pack watches from a distance',
-    fontSize: 24,
-  },
-  {
-    label: 'Paragraph',
-    text: 'Text balancing distributes words evenly across lines so that no single line is noticeably shorter than the others, avoiding orphans and ragged endings.',
-    fontSize: 16,
-  },
-  {
-    label: 'Single long word',
-    text: 'Supercalifragilisticexpialidocious is a very long word',
-    fontSize: 22,
-  },
-  {
-    label: 'Emoji',
-    text: 'Shipping balanced text 🚀 to every screen 🎉 on every device 📱 today',
-    fontSize: 22,
-  },
-  {
-    label: 'RTL (Arabic)',
-    text: 'تغليف النص المتوازن لتطبيقات رياكت نيتف على جميع الأجهزة والشاشات',
-    fontSize: 22,
-  },
-  {
-    label: 'Mixed font',
-    text: 'Monospaced text balances differently than proportional text does',
-    fontSize: 22,
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
-  },
-];
+import { check, distinct, undistinct, type Expectation, type Line, type Result } from './checks';
+import { SAMPLES, type Sample } from './samples';
 
-const WIDTHS = [320, 240, 180];
-
-// PROTOTYPE (ticket 04): checks hit-testing and onTextLayout agree with the balanced draw.
-function HitTestProbe({ balance }: { balance: boolean }) {
-  const [taps, setTaps] = useState(0);
-  const [lines, setLines] = useState('');
-  return (
-    <View style={styles.group}>
-      <Text style={styles.label}>Hit-test + onTextLayout (tap the blue span)</Text>
-      <View style={styles.box}>
-        <Text
-          key={balance ? 'balanced' : 'highQuality'}
-          textBreakStrategy={balance ? 'balanced' : 'highQuality'}
-          onTextLayout={(e) =>
-            setLines(e.nativeEvent.lines.map((l) => `${Math.round(l.width)}`).join(' / '))
-          }
-          style={{ width: 240, fontSize: 20, color: '#111' }}>
-          Balanced lines should still route taps to the{' '}
-          <Text style={{ color: '#06c' }} onPress={() => setTaps((t) => t + 1)}>
-            right nested span
-          </Text>{' '}
-          at the end
-        </Text>
-      </View>
-      <Text style={styles.width}>
-        taps: {taps} · line widths: {lines}
-      </Text>
-    </View>
-  );
-}
-
-// TODO(ticket 03): android compares `textBreakStrategy`. Replace with the library's
-// `Text` + `balance` prop once it exists.
+// Self-checking test screen. Each sample renders three times at a fixed width:
+// - stock: no textBreakStrategy;
+// - twin: textBreakStrategy="highQuality", which must render exactly like stock;
+// - test: textBreakStrategy="balanced", checked against the sample's expectation.
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -91,50 +17,121 @@ export default function App() {
   );
 }
 
+type Results = Record<string, { unchanged?: Result; expected?: Result }>;
+
 function Screen() {
   const insets = useSafeAreaInsets();
-  const [balance, setBalance] = useState(true);
+  const [results, setResults] = useState<Results>({});
+
+  const checks = Object.values(results).flatMap((r) => [r.unchanged, r.expected]);
+  const done = checks.filter(Boolean).length === SAMPLES.length * 2;
+  const passed = checks.filter((r) => r?.pass).length;
+
+  useEffect(() => {
+    if (done) {
+      console.log(`[test screen] ${Platform.OS}: ${passed}/${checks.length} passed`);
+      for (const s of SAMPLES) {
+        const r = results[s.id];
+        console.log(
+          `[test screen] ${s.id}: unchanged ${mark(r.unchanged)} · ${s.expect} ${mark(r.expected)} (${r.expected?.detail})`
+        );
+      }
+    }
+  }, [done]);
 
   return (
     <View style={styles.container}>
-      <View style={[styles.bar, { paddingTop: styles.bar.padding + insets.top }]}>
-        <Text style={styles.barText}>
-          {Platform.OS === 'android'
-            ? 'textBreakStrategy: balanced'
-            : 'balance (iOS: tailIndent prototype)'}
-        </Text>
-        <Switch value={balance} onValueChange={setBalance} />
+      <View style={[styles.bar, { paddingTop: 12 + insets.top }]}>
+        <Text style={styles.barText}>textBreakStrategy="balanced" · {Platform.OS}</Text>
+        <Text style={styles.barText}>{done ? `${passed}/${checks.length} ✅` : '…'}</Text>
       </View>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingBottom: styles.scroll.padding + insets.bottom },
-        ]}>
-        <HitTestProbe balance={balance} />
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 16 + insets.bottom }]}>
         {SAMPLES.map((s) => (
-          <View key={s.label} style={styles.group}>
-            <Text style={styles.label}>{s.label}</Text>
-            {WIDTHS.map((w) => (
-              <View key={w} style={styles.box}>
-                <Text style={styles.width}>{w}pt</Text>
-                <Text
-                  key={balance ? 'balanced' : 'highQuality'}
-                  style={{
-                    width: w,
-                    fontSize: s.fontSize,
-                    fontFamily: s.fontFamily,
-                    textAlign: s.textAlign,
-                    color: '#111',
-                  }}
-                  textBreakStrategy={balance ? 'balanced' : 'highQuality'}>
-                  {s.text}
-                </Text>
-              </View>
-            ))}
-          </View>
+          <SampleCard
+            key={s.id}
+            sample={s}
+            onResult={(key, result) =>
+              setResults((prev) => ({ ...prev, [s.id]: { ...prev[s.id], [key]: result } }))
+            }
+          />
         ))}
       </ScrollView>
     </View>
+  );
+}
+
+const mark = (r?: Result) => (r ? (r.pass ? '✅' : '❌') : '…');
+
+type Rendering = 'stock' | 'twin' | 'test';
+
+function SampleCard({
+  sample,
+  onResult,
+}: {
+  sample: Sample;
+  onResult: (key: 'unchanged' | 'expected', result: Result) => void;
+}) {
+  const [lines, setLines] = useState<Partial<Record<Rendering, Line[]>>>({});
+
+  const onLayout = (rendering: Rendering) => (e: TextLayoutEvent) => {
+    const next = e.nativeEvent.lines.map((l) => ({
+      text: undistinct(l.text),
+      width: l.width,
+    }));
+    setLines((prev) => ({ ...prev, [rendering]: next }));
+  };
+
+  const { stock, twin, test } = lines;
+  const unchanged = stock && twin ? check('unchanged', stock, twin) : undefined;
+  const expected = stock && test ? check(sample.expect, stock, test) : undefined;
+
+  useEffect(() => {
+    if (unchanged) onResult('unchanged', unchanged);
+  }, [unchanged?.pass, unchanged?.detail]);
+  useEffect(() => {
+    if (expected) onResult('expected', expected);
+  }, [expected?.pass, expected?.detail]);
+
+  const textStyle = [styles.text, sample.style, { width: sample.width }];
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>
+        {sample.label} · {sample.width}pt
+      </Text>
+      <Badge name="unchanged" result={unchanged} />
+      <Badge name={sample.expect} result={expected} />
+
+      <Text style={styles.caption}>stock</Text>
+      <View style={styles.box}>
+        <Text style={textStyle} onTextLayout={onLayout('stock')}>
+          {distinct(sample.text, 0)}
+        </Text>
+      </View>
+
+      <Text style={styles.caption}>textBreakStrategy="balanced"</Text>
+      <View style={styles.box}>
+        <Text style={textStyle} textBreakStrategy="balanced" onTextLayout={onLayout('test')}>
+          {distinct(sample.text, 1)}
+        </Text>
+      </View>
+
+      {/* The unchanged twin: hidden from view, but still laid out so onTextLayout fires. */}
+      <View style={styles.hidden} pointerEvents="none">
+        <Text style={textStyle} textBreakStrategy="highQuality" onTextLayout={onLayout('twin')}>
+          {distinct(sample.text, 2)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function Badge({ name, result }: { name: Expectation; result?: Result }) {
+  return (
+    <Text style={[styles.badge, result && !result.pass && styles.fail]}>
+      {mark(result)} {name}
+      {result ? ` · ${result.detail}` : ''}
+    </Text>
   );
 }
 
@@ -144,18 +141,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
     backgroundColor: '#fff',
   },
-  barText: { fontSize: 16, fontWeight: '600' },
+  barText: { fontSize: 15, fontWeight: '600', color: '#111' },
   scroll: { padding: 16, gap: 16 },
-  group: { backgroundColor: '#fff', borderRadius: 10, padding: 12, gap: 8 },
+  card: { backgroundColor: '#fff', borderRadius: 10, padding: 12, gap: 6 },
   label: { fontSize: 14, fontWeight: '700', color: '#555' },
+  badge: { fontSize: 12, color: '#262' },
+  fail: { color: '#b00' },
+  caption: { fontSize: 10, color: '#999', marginTop: 4 },
   box: {
+    alignSelf: 'flex-start',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#bbb',
-    alignSelf: 'flex-start',
-    padding: 4,
   },
-  width: { fontSize: 10, color: '#999' },
+  text: { color: '#111' },
+  hidden: { position: 'absolute', opacity: 0, left: 12, top: 12 },
 });

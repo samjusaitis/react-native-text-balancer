@@ -14,4 +14,5 @@ Spec: [spec.md](../../text-balance/spec.md) (Testing Decisions). Detail: ticket 
 
 - [ ] One command runs the whole matrix unattended and prints a pass/fail table per RN version, plus the example builds.
 - [ ] The current code passes on every RN minor from 0.85 to the latest, and on the RC.
+- [ ] The bare apps install the library from a git URL (a local tag or commit), and the installed package holds only the shipped files (`package.json`, iOS sources, podspec, RN CLI config). This confirms the `files` allowlist applies to git installs, which bun's `file:` install ignored (ticket 01).
 - [ ] Pointing it at RN 0.84 fails with the library's `#error`, not an obscure compile error.
