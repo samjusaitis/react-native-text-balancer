@@ -6,10 +6,10 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "bundleIdentifier": "com.codefish.textbalancerexample"
+      "bundleIdentifier": "com.samjusaitis.textbalancerexample"
     },
     "android": {
-      "package": "com.codefish.textbalancerexample"
+      "package": "com.samjusaitis.textbalancerexample"
     }
   }
 }

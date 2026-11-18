@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.authors      = package['author']
   s.homepage     = package['homepage']
   s.platforms    = { :ios => min_ios_version_supported }
-  s.source       = { git: 'https://github.com/samcodefish/react-native-text-balancer.git', tag: "v#{s.version}" }
+  s.source       = { git: 'https://github.com/samjusaitis/react-native-text-balancer.git', tag: "v#{s.version}" }
   s.source_files = 'ios/**/*.{h,m,mm}'
   s.private_header_files = 'ios/**/*.h'
 

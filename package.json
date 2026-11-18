@@ -2,12 +2,12 @@
   "name": "react-native-text-balancer",
   "version": "0.1.0",
   "description": "Makes React Native's textBreakStrategy=\"balanced\" balance line breaks on iOS, as it does on Android",
-  "author": "samcodefish",
+  "author": "samjusaitis",
   "license": "MIT",
-  "homepage": "https://github.com/samcodefish/react-native-text-balancer#readme",
+  "homepage": "https://github.com/samjusaitis/react-native-text-balancer#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/samcodefish/react-native-text-balancer.git"
+    "url": "git+https://github.com/samjusaitis/react-native-text-balancer.git"
   },
   "files": [
     "ios/",
