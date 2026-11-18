@@ -53,3 +53,6 @@ yarn-error.log
 # Expo
 .expo/
 expo-env.d.ts
+
+# Test-screen snapshots (example/scripts/snapshot.sh)
+/.snapshots/

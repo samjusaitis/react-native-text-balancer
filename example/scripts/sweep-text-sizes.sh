@@ -17,7 +17,7 @@
 set -euo pipefail
 
 UDID="${1:-booted}"
-BUNDLE_ID=com.codefish.textbalancerexample
+BUNDLE_ID=$(node -p "require('$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/app.json').expo.ios.bundleIdentifier")
 SIZES=(
   extra-small small medium large extra-large extra-extra-large extra-extra-extra-large
   accessibility-medium accessibility-large accessibility-extra-large

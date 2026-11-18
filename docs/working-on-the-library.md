@@ -24,6 +24,8 @@ On Android, the same screen checks React Native’s own `balanced`.
 
 To check Dynamic Type, `example/scripts/sweep-text-sizes.sh` steps a booted iOS simulator through every text size while the test screen runs, and prints the result at each size. The top of the script explains how to build and install the app first.
 
+To check that a change to the native code alters nothing it shouldn't, `example/scripts/snapshot.sh <dir>` records every balanced line (text and width) at every text size, and a screenshot of each sample on its own. Take one before the change and one after, then compare them with `diff -r`. Both runs need a Release build installed, like the sweep. To show one sample on its own, launch the app with `-only <sample id>`.
+
 ## `verify:matrix`
 
 Before a release, or when a new React Native version or release candidate comes out, run:

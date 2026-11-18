@@ -74,7 +74,7 @@ export const SAMPLES: Sample[] = [
   {
     id: 'latin-no-fixed-width',
     label: 'Latin headline, no fixed width',
-    text: 'Without a fixed width the box keeps its default size while this headline balances',
+    text: 'Without a fixed width the box keeps its usual size while this headline balances',
     width: 240,
     noFixedWidth: true,
     expect: 'balanced',

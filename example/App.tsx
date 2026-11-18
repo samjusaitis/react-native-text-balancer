@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Platform,
   ScrollView,
+  Settings,
   StyleSheet,
   Text,
   type TextLayoutEvent,
@@ -42,7 +43,15 @@ export default function App() {
 // for a Dynamic Type sample.
 type Results = Record<string, Record<string, Result | undefined>>;
 
-const TOTAL_CHECKS = (SAMPLES.length + DYNAMIC_TYPE_SAMPLES.length) * 2;
+// Launch with `-only <sample id>` (iOS) to render just that sample, at a fixed place on screen, for
+// screenshots: `xcrun simctl launch booted <bundle id> -only latin-left`.
+const ONLY = Platform.OS === 'ios' ? (Settings.get('only') as string | undefined) : undefined;
+const shown = <T extends { id: string }>(samples: T[]) =>
+  ONLY ? samples.filter((s) => s.id === ONLY) : samples;
+const SHOWN_SAMPLES = shown(SAMPLES);
+const SHOWN_DYNAMIC_TYPE_SAMPLES = shown(DYNAMIC_TYPE_SAMPLES);
+
+const TOTAL_CHECKS = (SHOWN_SAMPLES.length + SHOWN_DYNAMIC_TYPE_SAMPLES.length) * 2;
 
 // The summary goes to the native log, where `example/scripts/sweep-text-sizes.sh` reads it. A
 // Release build passes only console.error there (and has no LogBox to show it); Debug logs
@@ -54,6 +63,8 @@ function Screen() {
   const { fontScale } = useWindowDimensions();
   const generation = useGeneration(fontScale);
   const [results, setResults] = useState<Results>({});
+  // Each sample's balanced lines, logged with the summary so runs can be compared line for line.
+  const balancedLines = useRef<Record<string, Line[]>>({});
 
   const checks = Object.values(results).flatMap((r) => Object.values(r));
   const done = checks.filter(Boolean).length === TOTAL_CHECKS;
@@ -67,16 +78,22 @@ function Screen() {
     if (!done) return;
     const timer = setTimeout(() => {
       report(`[test screen] ${Platform.OS} @ text ×${scale}: ${passed}/${TOTAL_CHECKS} passed`);
-      for (const s of SAMPLES) {
+      for (const s of SHOWN_SAMPLES) {
         const r = results[s.id];
         report(
           `[test screen] ${s.id}: unchanged ${mark(r.unchanged)} · ${s.expect} ${mark(r.expected)} (${r.expected?.detail})`
         );
       }
-      for (const s of DYNAMIC_TYPE_SAMPLES) {
+      for (const s of SHOWN_DYNAMIC_TYPE_SAMPLES) {
         const r = results[s.id];
         report(
           `[test screen] ${s.id}: rebalanced ${mark(r.rebalanced)} · no worse ${mark(r.valid)} (${r.valid?.detail})`
+        );
+      }
+      // One line each, so no log line gets long enough to be cut off.
+      for (const s of [...SHOWN_SAMPLES, ...SHOWN_DYNAMIC_TYPE_SAMPLES]) {
+        (balancedLines.current[s.id] ?? []).forEach((l, i) =>
+          report(`[test screen] lines ${s.id} ${i}: ${l.width.toFixed(2)} ${JSON.stringify(l.text)}`)
         );
       }
     }, 1500);
@@ -85,6 +102,9 @@ function Screen() {
 
   const onResult = (id: string) => (key: string, result: Result) =>
     setResults((prev) => ({ ...prev, [id]: { ...prev[id], [key]: result } }));
+  const onBalancedLines = (id: string) => (lines: Line[]) => {
+    balancedLines.current[id] = lines;
+  };
 
   return (
     <View style={styles.container}>
@@ -96,16 +116,22 @@ function Screen() {
       </View>
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 16 + insets.bottom }]}>
         <Text style={styles.section}>Samples · fixed text size</Text>
-        {SAMPLES.map((s) => (
-          <SampleCard key={s.id} sample={s} onResult={onResult(s.id)} />
+        {SHOWN_SAMPLES.map((s) => (
+          <SampleCard
+            key={s.id}
+            sample={s}
+            onResult={onResult(s.id)}
+            onBalancedLines={onBalancedLines(s.id)}
+          />
         ))}
         <Text style={styles.section}>Dynamic Type · scales with text size</Text>
-        {DYNAMIC_TYPE_SAMPLES.map((s) => (
+        {SHOWN_DYNAMIC_TYPE_SAMPLES.map((s) => (
           <DynamicTypeCard
             key={s.id}
             sample={s}
             generation={generation}
             onResult={onResult(s.id)}
+            onBalancedLines={onBalancedLines(s.id)}
           />
         ))}
       </ScrollView>
@@ -129,9 +155,11 @@ type Rendering = 'default' | 'twin' | 'test';
 function SampleCard({
   sample,
   onResult,
+  onBalancedLines,
 }: {
   sample: Sample;
   onResult: (key: 'unchanged' | 'expected', result: Result) => void;
+  onBalancedLines: (lines: Line[]) => void;
 }) {
   const [lines, setLines] = useState<Partial<Record<Rendering, Line[]>>>({});
   const [pressed, setPressed] = useState<string>();
@@ -142,6 +170,7 @@ function SampleCard({
       width: l.width,
     }));
     setLines((prev) => ({ ...prev, [rendering]: next }));
+    if (rendering === 'test') onBalancedLines(next);
   };
 
   const { default: defaultLines, twin, test } = lines;
@@ -238,10 +267,12 @@ function DynamicTypeCard({
   sample,
   generation,
   onResult,
+  onBalancedLines,
 }: {
   sample: DynamicTypeSample;
   generation: number;
   onResult: (key: 'rebalanced' | 'valid', result: Result) => void;
+  onBalancedLines: (lines: Line[]) => void;
 }) {
   const [defaultLines, setDefaultLines] = useState<Line[]>();
   const [live, setLive] = useState<Line[]>();
@@ -282,7 +313,11 @@ function DynamicTypeCard({
         <Text
           style={textStyle}
           textBreakStrategy="balanced"
-          onTextLayout={(e) => setLive(toLines(e))}>
+          onTextLayout={(e) => {
+            const next = toLines(e);
+            setLive(next);
+            onBalancedLines(next);
+          }}>
           {distinct(sample.text, 1)}
         </Text>
       </View>
