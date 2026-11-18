@@ -3,15 +3,15 @@ import type { TextProps, TextStyle } from 'react-native';
 import type { Expectation } from './checks';
 
 // One test-screen sample: a string at a fixed width and text size (Dynamic Type doesn't scale it), and what `textBreakStrategy="balanced"`
-// should do to it compared with stock wrapping. Later build tickets append their samples here.
-// A 'balanced' sample must wrap raggedly under stock wrapping on both platforms: if stock is
+// should do to it compared with default wrapping. Later build tickets append their samples here.
+// A 'balanced' sample must wrap raggedly under default wrapping on both platforms: if default wrapping is
 // already as even as it can be, balancing rightly changes nothing and the check reads ❌.
 export type Sample = {
   id: string;
   label: string;
   text: string;
   width: number; // the Text's width, or its maximum width when `noFixedWidth` is set
-  // Set no width, only `width` as a maximum, to check that the box keeps its stock size. Shown
+  // Set no width, only `width` as a maximum, to check that the box keeps its default size. Shown
   // beside a neighbouring view.
   noFixedWidth?: boolean;
   expect: Exclude<Expectation, 'unchanged'>;
@@ -74,7 +74,7 @@ export const SAMPLES: Sample[] = [
   {
     id: 'latin-no-fixed-width',
     label: 'Latin headline, no fixed width',
-    text: 'Without a fixed width the box keeps its stock size while this headline balances',
+    text: 'Without a fixed width the box keeps its default size while this headline balances',
     width: 240,
     noFixedWidth: true,
     expect: 'balanced',
@@ -187,18 +187,18 @@ export const SAMPLES: Sample[] = [
   {
     id: 'number-of-lines-truncates',
     label: 'numberOfLines 2, truncates',
-    text: 'A clamped headline that runs past its line limit keeps stock wrapping and the stock ellipsis at the end of the last line',
+    text: 'A clamped headline that runs past its line limit keeps default wrapping and the default ellipsis at the end of the last line',
     width: 240,
-    expect: 'stock',
+    expect: 'default',
     style: { fontSize: 22 },
     props: { numberOfLines: 2 },
   },
   {
     id: 'tab',
     label: 'Tab in the paragraph',
-    text: 'Tabs\tkeep stock wrapping because a tab stop moves with where the tab lands on its line',
+    text: 'Tabs\tkeep default wrapping because a tab stop moves with where the tab lands on its line',
     width: 240,
-    expect: 'stock',
+    expect: 'default',
     style: { fontSize: 20 },
   },
   {
@@ -206,7 +206,7 @@ export const SAMPLES: Sample[] = [
     label: 'Word wider than the box',
     text: 'Antidisestablishmentarianism-everywhere is one word wider than this box',
     width: 240,
-    expect: 'stock',
+    expect: 'default',
     style: { fontSize: 24 },
   },
   {
@@ -222,9 +222,9 @@ export const SAMPLES: Sample[] = [
   {
     id: 'push-out-tab',
     label: 'push-out, tab paragraph (falls back)',
-    text: 'With push-out set,\ta paragraph that falls back keeps push-out on its stock style',
+    text: 'With push-out set,\ta paragraph that falls back keeps push-out on its original style',
     width: 240,
-    expect: 'stock',
+    expect: 'default',
     style: { fontSize: 20 },
     props: { lineBreakStrategyIOS: 'push-out' },
   },
@@ -232,7 +232,7 @@ export const SAMPLES: Sample[] = [
 
 // A Dynamic Type sample: a balanced string that scales with the text size, at a fixed width. Its
 // wrapping changes with the size, so it's checked for what holds at any size: the balanced copy
-// is no worse than stock, and matches a copy mounted fresh at the current size.
+// is no worse than default wrapping, and matches a copy mounted fresh at the current size.
 export type DynamicTypeSample = {
   id: string;
   label: string;

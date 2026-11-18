@@ -10,6 +10,6 @@ The library ships no `Text` component of its own. Installing it makes RN's own `
 ## Consequences
 
 We call a private method whose signature isn't a stable API. The swizzle checks
-the selector and its type encoding, and on a mismatch it falls back to stock
+the selector and its type encoding, and on a mismatch it falls back to default
 wrapping with one dev warning. Each RN minor still needs an iOS build in `verify:matrix`
 before the tested range widens.

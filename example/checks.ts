@@ -1,8 +1,8 @@
-// What a sample expects of a `Text`, compared with the same string under stock wrapping:
-// - balanced: the same line count, with line widths that vary less than stock's;
-// - stock: identical lines (the fallback cases);
+// What a sample expects of a `Text`, compared with the same string under default wrapping:
+// - balanced: the same line count, with line widths that vary less than default wrapping's;
+// - default: identical lines (the fallback cases);
 // - unchanged: identical lines, for a `Text` that doesn't ask for balancing.
-export type Expectation = 'balanced' | 'stock' | 'unchanged';
+export type Expectation = 'balanced' | 'default' | 'unchanged';
 
 export type Line = { text: string; width: number };
 
@@ -22,39 +22,39 @@ const sameLines = (a: Line[], b: Line[]) =>
 const sameTexts = (a: Line[], b: Line[]) =>
   a.length === b.length && a.every((line, i) => line.text === b[i].text);
 
-export function check(expect: Expectation, stock: Line[], actual: Line[]): Result {
+export function check(expect: Expectation, defaultLines: Line[], actual: Line[]): Result {
   if (expect === 'balanced') {
-    if (actual.length !== stock.length) {
-      return { pass: false, detail: `${actual.length} lines, stock has ${stock.length}` };
+    if (actual.length !== defaultLines.length) {
+      return { pass: false, detail: `${actual.length} lines, default has ${defaultLines.length}` };
     }
     // Same breaks can still report a lower variance: a balanced line's narrowed fragment clips
-    // its trailing space, which stock's reported width includes. So the breaks must move.
-    if (sameTexts(stock, actual)) {
-      return { pass: false, detail: 'same breaks as stock' };
+    // its trailing space, which default wrapping's reported width includes. So the breaks must move.
+    if (sameTexts(defaultLines, actual)) {
+      return { pass: false, detail: 'same breaks as default' };
     }
-    const before = variance(stock);
+    const before = variance(defaultLines);
     const after = variance(actual);
     return {
       pass: after < before,
       detail: `width variance ${before.toFixed(0)} → ${after.toFixed(0)}`,
     };
   }
-  return sameLines(stock, actual)
-    ? { pass: true, detail: 'identical to stock' }
-    : { pass: false, detail: 'differs from stock' };
+  return sameLines(defaultLines, actual)
+    ? { pass: true, detail: 'identical to default' }
+    : { pass: false, detail: 'differs from default' };
 }
 
-// A balanced layout that's no worse than stock: the same breaks (stock is already as even as it
+// A balanced layout that's no worse than default wrapping: the same breaks (default wrapping is already as even as it
 // can be at this size, or the paragraph fell back), or breaks that lower the width variance. For
 // the Dynamic Type samples, whose wrapping changes with the text size.
-export function noWorse(stock: Line[], actual: Line[]): Result {
-  if (actual.length !== stock.length) {
-    return { pass: false, detail: `${actual.length} lines, stock has ${stock.length}` };
+export function noWorse(defaultLines: Line[], actual: Line[]): Result {
+  if (actual.length !== defaultLines.length) {
+    return { pass: false, detail: `${actual.length} lines, default has ${defaultLines.length}` };
   }
-  if (sameTexts(stock, actual)) {
-    return { pass: true, detail: 'same breaks as stock' };
+  if (sameTexts(defaultLines, actual)) {
+    return { pass: true, detail: 'same breaks as default' };
   }
-  const before = variance(stock);
+  const before = variance(defaultLines);
   const after = variance(actual);
   return {
     pass: after < before,

@@ -24,10 +24,10 @@ import { DYNAMIC_TYPE_SAMPLES, type DynamicTypeSample, SAMPLES, type Sample } fr
 
 // Self-checking test screen. Each sample renders three times at a fixed width and a fixed text
 // size (`allowFontScaling={false}`, since the samples are tuned to wrap raggedly at it):
-// - stock: no textBreakStrategy;
-// - twin: textBreakStrategy="highQuality", which must render exactly like stock;
+// - default: no textBreakStrategy;
+// - twin: textBreakStrategy="highQuality", which must render exactly like default;
 // - test: textBreakStrategy="balanced", checked against the sample's expectation.
-// Each Dynamic Type sample scales with the text size and renders three times too: stock, a
+// Each Dynamic Type sample scales with the text size and renders three times too: default, a
 // balanced copy that stays mounted through text size changes, and a balanced copy mounted fresh
 // at the current size (see DynamicTypeCard).
 export default function App() {
@@ -124,7 +124,7 @@ function useGeneration(value: number) {
   return ref.current.generation;
 }
 
-type Rendering = 'stock' | 'twin' | 'test';
+type Rendering = 'default' | 'twin' | 'test';
 
 function SampleCard({
   sample,
@@ -144,10 +144,12 @@ function SampleCard({
     setLines((prev) => ({ ...prev, [rendering]: next }));
   };
 
-  const { stock, twin, test } = lines;
-  const unchanged = stock && twin ? check('unchanged', stock, twin) : undefined;
+  const { default: defaultLines, twin, test } = lines;
+  const unchanged = defaultLines && twin ? check('unchanged', defaultLines, twin) : undefined;
   const expected =
-    stock && test ? withKinsoku(sample, check(sample.expect, stock, test), test) : undefined;
+    defaultLines && test
+      ? withKinsoku(sample, check(sample.expect, defaultLines, test), test)
+      : undefined;
 
   useEffect(() => {
     if (unchanged) onResult('unchanged', unchanged);
@@ -177,14 +179,14 @@ function SampleCard({
       <Badge name="unchanged" result={unchanged} />
       <Badge name={sample.expect} result={expected} />
 
-      <Text style={styles.caption}>stock</Text>
+      <Text style={styles.caption}>default</Text>
       <View style={styles.row}>
         <View style={styles.box}>
           <Text
             style={textStyle}
             allowFontScaling={false}
             {...sample.props}
-            onTextLayout={onLayout('stock')}>
+            onTextLayout={onLayout('default')}>
             {content(0)}
           </Text>
         </View>
@@ -226,12 +228,12 @@ const toLines = (e: TextLayoutEvent): Line[] =>
   e.nativeEvent.lines.map((l) => ({ text: undistinct(l.text), width: l.width }));
 
 // A Dynamic Type sample, rendered three times at its width, scaling with the text size:
-// - stock: no textBreakStrategy;
+// - default: no textBreakStrategy;
 // - live: textBreakStrategy="balanced", mounted since launch, so it has to rebalance on each text
 //   size change;
 // - fresh: the same, remounted at each text size change with a string no other Text has had
 //   (`distinct`), so no measure, lines or break cache entry can serve it: laid out from scratch.
-// Checks: the live copy matches the fresh one (rebalanced), and is no worse than stock (valid).
+// Checks: the live copy matches the fresh one (rebalanced), and is no worse than default (valid).
 function DynamicTypeCard({
   sample,
   generation,
@@ -241,7 +243,7 @@ function DynamicTypeCard({
   generation: number;
   onResult: (key: 'rebalanced' | 'valid', result: Result) => void;
 }) {
-  const [stock, setStock] = useState<Line[]>();
+  const [defaultLines, setDefaultLines] = useState<Line[]>();
   const [live, setLive] = useState<Line[]>();
   // Tagged with the generation it was mounted at, so a fresh copy from before the latest text
   // size change isn't compared.
@@ -249,7 +251,7 @@ function DynamicTypeCard({
 
   const current = fresh?.generation === generation ? fresh.lines : undefined;
   const isRebalanced = current && live ? rebalanced(current, live) : undefined;
-  const valid = stock && live ? noWorse(stock, live) : undefined;
+  const valid = defaultLines && live ? noWorse(defaultLines, live) : undefined;
 
   useEffect(() => {
     if (isRebalanced) onResult('rebalanced', isRebalanced);
@@ -268,9 +270,9 @@ function DynamicTypeCard({
       <Badge name="rebalanced" result={isRebalanced} />
       <Badge name="no worse" result={valid} />
 
-      <Text style={styles.caption}>stock</Text>
+      <Text style={styles.caption}>default</Text>
       <View style={styles.box}>
-        <Text style={textStyle} onTextLayout={(e) => setStock(toLines(e))}>
+        <Text style={textStyle} onTextLayout={(e) => setDefaultLines(toLines(e))}>
           {distinct(sample.text, 0)}
         </Text>
       </View>

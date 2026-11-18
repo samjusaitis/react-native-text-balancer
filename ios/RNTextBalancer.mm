@@ -8,7 +8,7 @@
 // Outermost Text asked for textBreakStrategy="balanced". Every other Text gets exactly what RN built.
 //
 // RN's measure and lines caches key on ParagraphAttributes, which include textBreakStrategy, so a
-// balanced and a stock layout of the same string never share an entry.
+// balanced and a default layout of the same string never share an entry.
 //
 // The break cache: RN caches measure and lines, but draw (on the main thread) and hit-test build
 // the stack again for the same string and width. So the hook keeps what balancing applied and
@@ -156,7 +156,7 @@ static NSTextStorage *RNTBBuild(
     // Deferred so RN's logging is set up; +load runs once, so this warns once per process.
     dispatch_async(dispatch_get_main_queue(), ^{
       RCTLogWarn(
-          @"react-native-text-balancer: %@. textBreakStrategy=\"balanced\" uses stock wrapping on iOS with this React Native version.",
+          @"react-native-text-balancer: %@. textBreakStrategy=\"balanced\" uses default wrapping on iOS with this React Native version.",
           problem);
     });
 #endif
