@@ -2,6 +2,7 @@
 
 #import <CoreText/CoreText.h>
 
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 
@@ -97,14 +98,26 @@ struct RNTBParagraph {
   NSRange content; // without it
   std::vector<RNTBStockLine> stock; // its lines under stock wrapping
   bool planned = false;
+  bool repaired = false; // has had its one repair retry
   std::vector<NSUInteger> starts; // planned line starts (absolute)
   std::vector<std::pair<NSUInteger, CGFloat>> widths; // planned line start -> rect width, all but the last line
   RNTBSide side = RNTBSide::Left;
+
+  // Plan inputs, relative to `content`.
+  std::vector<unichar> chars;
+  std::vector<CGFloat> prefix; // logical-order advance sum before each index
+  std::vector<NSUInteger> candidates; // possible line starts, sorted, including 0 and the length
+  NSAttributedString *text = nil; // the content's attributed substring
 };
 
 static bool isBreakSpace(unichar c)
 {
   return c == ' ' || c == '\t' || c == 0x3000 || (c >= 0x2000 && c <= 0x200A && c != 0x2007);
+}
+
+static bool isHangul(unichar c)
+{
+  return (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0x1100 && c <= 0x11FF) || (c >= 0x3130 && c <= 0x318F);
 }
 
 // Where this paragraph's lines sit: from its alignment, its writing direction, or failing both
@@ -142,34 +155,57 @@ static RNTBSide sideOf(NSTextStorage *storage, const RNTBParagraph &p, CGFloat c
   return lean > 0.5 ? RNTBSide::Right : RNTBSide::Left;
 }
 
-// Plans the paragraph at its stock line count k: space-separated words as break points, widths from
-// one CTLine, and the k-line split minimising Σ(U − wᵢ)² with no line wider than U. Returns false if
-// no k-line plan fits.
-static bool plan(NSTextStorage *storage, RNTBParagraph &p, CGFloat U, CGFloat padding)
+// Break candidates and widths for the paragraph.
+//
+// Candidates are CFStringTokenizer line-break units (UAX #14: spaces, hyphens, soft hyphens, CJK
+// with kinsoku, dictionary breaks for Thai), plus both sides of each inline attachment (U+FFFC).
+// Under hangul-word priority, breaks between two Hangul characters are dropped.
+//
+// Widths are glyph advances from one CTLine, attributed to string indices in logical order and
+// prefix-summed, so they don't depend on the paragraph's direction (caret offsets jump about in
+// bidi lines). An attachment takes its `bounds` width, which Core Text doesn't see.
+static void gatherInputs(NSTextStorage *storage, RNTBParagraph &p)
 {
-  size_t k = p.stock.size();
-  NSString *text = [storage.string substringWithRange:p.content];
-  NSUInteger len = text.length;
-  std::vector<unichar> chars(len);
-  [text getCharacters:chars.data() range:NSMakeRange(0, len)];
+  p.text = [storage attributedSubstringFromRange:p.content];
+  NSString *string = p.text.string;
+  NSUInteger len = string.length;
+  p.chars.resize(len);
+  [string getCharacters:p.chars.data() range:NSMakeRange(0, len)];
 
-  // Break points: word starts after a space, plus both ends.
-  std::vector<NSUInteger> points{0};
-  for (NSUInteger i = 1; i < len; i++) {
-    if (isBreakSpace(chars[i - 1]) && !isBreakSpace(chars[i])) {
-      points.push_back(i);
+  std::vector<NSUInteger> &c = p.candidates;
+  c.assign(1, 0);
+  CFStringTokenizerRef tokenizer =
+      CFStringTokenizerCreate(NULL, (CFStringRef)string, CFRangeMake(0, len), kCFStringTokenizerUnitLineBreak, NULL);
+  while (CFStringTokenizerAdvanceToNextToken(tokenizer) != kCFStringTokenizerTokenNone) {
+    CFIndex at = CFStringTokenizerGetCurrentTokenRange(tokenizer).location;
+    if (at > 0 && (NSUInteger)at < len) {
+      c.push_back(at);
     }
   }
-  points.push_back(len);
-  size_t m = points.size() - 1; // words
-  if (m < k) {
-    return false;
+  CFRelease(tokenizer);
+  for (NSUInteger i = 0; i < len; i++) {
+    if (p.chars[i] == 0xFFFC) {
+      if (i > 0) {
+        c.push_back(i);
+      }
+      if (i + 1 < len) {
+        c.push_back(i + 1);
+      }
+    }
+  }
+  c.push_back(len);
+  std::sort(c.begin(), c.end());
+  c.erase(std::unique(c.begin(), c.end()), c.end());
+  NSParagraphStyle *style = [p.text attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:NULL];
+  if (style.lineBreakStrategy & NSLineBreakStrategyHangulWordPriority) {
+    c.erase(std::remove_if(c.begin() + 1,
+                           c.end() - 1,
+                           [&](NSUInteger i) { return isHangul(p.chars[i - 1]) && isHangul(p.chars[i]); }),
+            c.end() - 1);
   }
 
-  // Glyph advances from one CTLine, attributed to string indices in logical order and prefix-summed,
-  // so widths don't depend on the paragraph's direction (caret offsets jump about in RTL lines).
-  CTLineRef line = CTLineCreateWithAttributedString((CFAttributedStringRef)[storage attributedSubstringFromRange:p.content]);
-  std::vector<CGFloat> prefix(len + 1, 0);
+  std::vector<CGFloat> advance(len, 0);
+  CTLineRef line = CTLineCreateWithAttributedString((CFAttributedStringRef)p.text);
   CFArrayRef runs = CTLineGetGlyphRuns(line);
   std::vector<CGSize> advances;
   std::vector<CFIndex> indices;
@@ -182,74 +218,143 @@ static bool plan(NSTextStorage *storage, RNTBParagraph &p, CGFloat U, CGFloat pa
     CTRunGetStringIndices(run, CFRangeMake(0, 0), indices.data());
     for (CFIndex g = 0; g < count; g++) {
       if (indices[g] >= 0 && (NSUInteger)indices[g] < len) {
-        prefix[indices[g] + 1] += advances[g].width;
+        advance[indices[g]] += advances[g].width;
       }
     }
   }
   CFRelease(line);
   for (NSUInteger i = 0; i < len; i++) {
-    prefix[i + 1] += prefix[i];
-  }
-
-  // x of each word's start, and of the end of the text before it with its spaces stripped.
-  std::vector<CGFloat> xStart(m + 1), xEnd(m + 1);
-  for (size_t j = 0; j <= m; j++) {
-    NSUInteger end = points[j];
-    while (end > 0 && isBreakSpace(chars[end - 1])) {
-      end--;
-    }
-    xStart[j] = prefix[points[j]];
-    xEnd[j] = prefix[end];
-  }
-  auto width = [&](size_t a, size_t b) { return MAX((CGFloat)0, xEnd[b] - xStart[a]); };
-
-  const double kInfinity = 1e300;
-  std::vector<std::vector<double>> cost(k + 1, std::vector<double>(m + 1, kInfinity));
-  std::vector<std::vector<size_t>> from(k + 1, std::vector<size_t>(m + 1, 0));
-  cost[0][0] = 0;
-  for (size_t l = 1; l <= k; l++) {
-    for (size_t j = l; j <= m; j++) {
-      for (size_t i = l - 1; i < j; i++) {
-        if (cost[l - 1][i] >= kInfinity) {
-          continue;
-        }
-        CGFloat w = width(i, j);
-        if (w > U + 0.5) {
-          continue;
-        }
-        double c = cost[l - 1][i] + (U - w) * (U - w);
-        if (c < cost[l][j]) {
-          cost[l][j] = c;
-          from[l][j] = i;
-        }
+    if (p.chars[i] == 0xFFFC) {
+      NSTextAttachment *attachment = [p.text attribute:NSAttachmentAttributeName atIndex:i effectiveRange:NULL];
+      if (attachment != nil) {
+        advance[i] = attachment.bounds.size.width;
       }
     }
   }
-  if (cost[k][m] >= kInfinity) {
+  p.prefix.assign(len + 1, 0);
+  for (NSUInteger i = 0; i < len; i++) {
+    p.prefix[i + 1] = p.prefix[i] + advance[i];
+  }
+}
+
+// Advance of the '-' TextKit draws when it breaks at the soft hyphen at relative index `i`.
+static CGFloat hyphenAdvance(const RNTBParagraph &p, NSUInteger i)
+{
+  UIFont *font = [p.text attribute:NSFontAttributeName atIndex:i effectiveRange:NULL];
+  if (font == nil) {
+    return 0;
+  }
+  UniChar hyphen = '-';
+  CGGlyph glyph;
+  if (!CTFontGetGlyphsForCharacters((__bridge CTFontRef)font, &hyphen, &glyph, 1)) {
+    return 0;
+  }
+  return CTFontGetAdvancesForGlyphs((__bridge CTFontRef)font, kCTFontOrientationHorizontal, &glyph, NULL, 1);
+}
+
+// Plans the paragraph at its stock line count k: the k-line split of its candidates minimising
+// Σ(U − wᵢ)² with no line wider than U. Returns false if no k-line plan fits.
+static bool plan(RNTBParagraph &p, CGFloat U, CGFloat padding)
+{
+  size_t k = p.stock.size();
+  const std::vector<NSUInteger> &c = p.candidates;
+  size_t m = c.size() - 1; // segments
+  if (m < k) {
+    return false;
+  }
+  NSUInteger len = p.chars.size();
+
+  // x of each candidate's start, and of the end of a line broken there: trailing whitespace
+  // stripped, plus the '-' TextKit draws at a soft hyphen.
+  std::vector<CGFloat> xStart(m + 1), xEnd(m + 1);
+  for (size_t j = 0; j <= m; j++) {
+    NSUInteger end = c[j];
+    while (end > 0 && isBreakSpace(p.chars[end - 1])) {
+      end--;
+    }
+    xStart[j] = p.prefix[c[j]];
+    xEnd[j] = p.prefix[end];
+    if (c[j] > 0 && c[j] < len && p.chars[c[j] - 1] == 0x00AD) {
+      xEnd[j] += hyphenAdvance(p, c[j] - 1);
+    }
+  }
+  auto width = [&](size_t a, size_t b) { return MAX((CGFloat)0, xEnd[b] - xStart[a]); };
+
+  // Windowed: for each line end j, scan line starts i leftwards only while the line still fits, so
+  // CJK's one candidate per character costs O(k·m·c) for c candidates per line, not O(k·m²).
+  const double kInfinity = 1e300;
+  std::vector<double> cost((k + 1) * (m + 1), kInfinity);
+  std::vector<uint32_t> from((k + 1) * (m + 1), 0);
+  auto at = [&](size_t l, size_t j) { return l * (m + 1) + j; };
+  cost[at(0, 0)] = 0;
+  for (size_t l = 1; l <= k; l++) {
+    for (size_t j = l; j <= m; j++) {
+      double best = kInfinity;
+      size_t bestFrom = 0;
+      for (size_t i = j; i-- > l - 1;) {
+        CGFloat w = width(i, j);
+        if (w > U + 0.5) {
+          break; // lines only get wider as i moves left
+        }
+        double before = cost[at(l - 1, i)];
+        if (before >= kInfinity) {
+          continue;
+        }
+        double total = before + (U - w) * (U - w);
+        if (total < best) {
+          best = total;
+          bestFrom = i;
+        }
+      }
+      cost[at(l, j)] = best;
+      from[at(l, j)] = (uint32_t)bestFrom;
+    }
+  }
+  if (cost[at(k, m)] >= kInfinity) {
     return false;
   }
 
   std::vector<size_t> bounds(k + 1);
   bounds[k] = m;
   for (size_t l = k; l > 0; l--) {
-    bounds[l - 1] = from[l][bounds[l]];
+    bounds[l - 1] = from[at(l, bounds[l])];
   }
   p.starts.clear();
   p.widths.clear();
   for (size_t l = 0; l < k; l++) {
     size_t a = bounds[l], b = bounds[l + 1];
-    NSUInteger start = p.content.location + points[a];
+    NSUInteger start = p.content.location + c[a];
     p.starts.push_back(start);
     if (b == m) {
       continue; // the last line keeps the full width
     }
     // Slack of half the gap to the next break point (1–4pt) absorbs rounding without letting the
-    // next word fit.
+    // next segment fit.
     CGFloat w = width(a, b);
     CGFloat slack = MAX(1.0, MIN(4.0, (width(a, b + 1) - w) / 2));
     p.widths.push_back({start, MIN(U, w + slack) + 2 * padding});
   }
   return true;
+}
+
+// The one repair retry: at the first line start where TextKit disagreed with the plan, drop the
+// planned candidate, take TextKit's break as a candidate instead, and plan again.
+static bool repair(RNTBParagraph &p, const std::vector<NSUInteger> &got, CGFloat U, CGFloat padding)
+{
+  size_t d = 0;
+  while (d < got.size() && d < p.starts.size() && got[d] == p.starts[d]) {
+    d++;
+  }
+  NSUInteger first = p.content.location, last = NSMaxRange(p.content);
+  std::vector<NSUInteger> &c = p.candidates;
+  if (d < p.starts.size() && p.starts[d] > first && p.starts[d] < last) {
+    c.erase(std::remove(c.begin(), c.end(), p.starts[d] - first), c.end());
+  }
+  if (d < got.size() && got[d] > first && got[d] < last) {
+    c.insert(std::lower_bound(c.begin(), c.end(), got[d] - first), got[d] - first);
+    c.erase(std::unique(c.begin(), c.end()), c.end());
+  }
+  return plan(p, U, padding);
 }
 
 // Line starts TextKit laid out inside `p`.
@@ -289,20 +394,28 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
     return;
   }
 
-  // Count stock lines on RN's own (already font-scaled) stack, untruncated and unbounded in height,
-  // so every line shows up and none is cut off.
-  NSUInteger maxLines = container.maximumNumberOfLines;
-  NSLineBreakMode mode = container.lineBreakMode;
-  container.size = CGSizeMake(size.width, kUnboundedHeight);
-  container.maximumNumberOfLines = 0;
-  container.lineBreakMode = NSLineBreakByWordWrapping;
+  // All the work happens in our own container; RN's is never changed, so giving it back is exactly
+  // stock. Every change to a container's geometry makes TextKit lay the whole storage out again,
+  // so the plan container changes geometry once: from counting to RN's, before the check. (Moving
+  // RN's container to the counting geometry and back cost two extra layouts per build.)
+  //
+  // First, count stock lines (the plan container with no planned lines lays out as RN's does),
+  // untruncated and unbounded in height, so every line shows up and none is cut off.
+  CGFloat padding = container.lineFragmentPadding;
+  RNTBPlanContainer *planContainer =
+      [[RNTBPlanContainer alloc] initWithSize:CGSizeMake(size.width, MAX(size.height, kUnboundedHeight))];
+  planContainer.lineFragmentPadding = padding;
+  planContainer.maximumNumberOfLines = 0;
+  planContainer.lineBreakMode = container.maximumNumberOfLines == 0 ? container.lineBreakMode : NSLineBreakByWordWrapping;
+  planContainer.exclusionPaths = container.exclusionPaths;
+  [layoutManager removeTextContainerAtIndex:0];
+  [layoutManager addTextContainer:planContainer];
   auto restoreStock = [&]() {
-    container.size = size;
-    container.maximumNumberOfLines = maxLines;
-    container.lineBreakMode = mode;
+    [layoutManager removeTextContainerAtIndex:0];
+    [layoutManager addTextContainer:container];
   };
 
-  std::vector<RNTBStockLine> stock = layOut(layoutManager, container);
+  std::vector<RNTBStockLine> stock = layOut(layoutManager, planContainer);
   if (maximumNumberOfLines > 0 && stock.size() > maximumNumberOfLines) {
     restoreStock(); // truncates: stock wrapping and stock ellipsis
     return;
@@ -326,11 +439,14 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
     paragraphs.back().stock.push_back(line);
   }
 
-  CGFloat padding = container.lineFragmentPadding;
   CGFloat U = size.width - 2 * padding;
   bool anyPlanned = false;
   for (RNTBParagraph &p : paragraphs) {
-    if (p.stock.size() > 1 && p.content.length > 0 && plan(storage, p, U, padding)) {
+    if (p.stock.size() <= 1 || p.content.length == 0) {
+      continue;
+    }
+    gatherInputs(storage, p);
+    if (plan(p, U, padding)) {
       p.planned = true;
       p.side = sideOf(storage, p, size.width);
       anyPlanned = true;
@@ -341,20 +457,20 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
     return;
   }
 
-  // Impose the plan, then check that each planned paragraph's lines start where planned. Paragraphs
-  // lay out independently (each starts on a fresh line), so a paragraph that doesn't hold drops back
-  // to stock wrapping without moving the others; the second pass confirms that.
-  RNTBPlanContainer *planContainer = [[RNTBPlanContainer alloc] initWithSize:container.size];
-  planContainer.lineFragmentPadding = padding;
-  planContainer.maximumNumberOfLines = 0;
-  planContainer.lineBreakMode = NSLineBreakByWordWrapping;
-  planContainer.exclusionPaths = container.exclusionPaths;
+  // Impose the plan at RN's geometry, then check that each planned paragraph's lines start where
+  // planned. A paragraph that doesn't hold gets one repair retry, then drops back to stock
+  // wrapping. Paragraphs lay out independently (each starts on a fresh line), so that doesn't move
+  // the others; the next pass confirms it. If RN's height cuts lines off, nothing holds: stock.
+  // Setting a geometry that hasn't changed (measure's height is already unbounded) doesn't
+  // invalidate the layout, and nor does the plan, so invalidate it explicitly.
   fill(planContainer, paragraphs);
-  [layoutManager removeTextContainerAtIndex:0];
-  [layoutManager addTextContainer:planContainer];
+  planContainer.size = size;
+  planContainer.maximumNumberOfLines = container.maximumNumberOfLines;
+  planContainer.lineBreakMode = container.lineBreakMode;
+  [layoutManager textContainerChangedGeometry:planContainer];
 
   bool holds = false;
-  for (int pass = 0; pass < 2 && !holds; pass++) {
+  for (int pass = 0; pass < 4 && !holds; pass++) {
     std::vector<RNTBStockLine> laidOut = layOut(layoutManager, planContainer);
     holds = true;
     anyPlanned = false;
@@ -363,7 +479,12 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
       std::vector<NSUInteger> want = p.planned ? p.starts : startsIn(p.stock, p);
       if (got != want) {
         holds = false;
-        p.planned = false;
+        if (p.planned && !p.repaired) {
+          p.repaired = true;
+          p.planned = repair(p, got, U, padding);
+        } else {
+          p.planned = false;
+        }
       }
       anyPlanned = anyPlanned || p.planned;
     }
@@ -377,14 +498,6 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
   }
 
   if (!holds || !anyPlanned) {
-    // Give RN back its own container: exactly stock.
-    [layoutManager removeTextContainerAtIndex:0];
-    [layoutManager addTextContainer:container];
-    restoreStock();
-    return;
+    restoreStock(); // RN's own container: exactly stock
   }
-
-  planContainer.size = size;
-  planContainer.maximumNumberOfLines = maxLines;
-  planContainer.lineBreakMode = mode;
 }

@@ -36,6 +36,17 @@ export function check(expect: Expectation, stock: Line[], actual: Line[]): Resul
     : { pass: false, detail: 'differs from stock' };
 }
 
+// Characters a Japanese line must not start with: closing punctuation and small kana.
+const KINSOKU_START = /^[、。，．,.)\]｝〕〉》」』】〙〗〟’”｠»）！？!?：；・ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰ-ㇿ]/;
+
+// Lines that break a kinsoku rule, for the Japanese sample.
+export function kinsoku(lines: Line[]): Result {
+  const bad = lines.slice(1).filter((l) => KINSOKU_START.test(l.text));
+  return bad.length
+    ? { pass: false, detail: `line starts with ${bad.map((l) => l.text[0]).join(' ')}` }
+    : { pass: true, detail: 'kinsoku kept' };
+}
+
 // RN's text measure cache ignores some paragraph attributes (`lineBreakStrategy`), so two `Text`s
 // with the same string can share one `onTextLayout` result. A different number of trailing word
 // joiners (U+2060, zero width, no break opportunity) keeps each rendering's string distinct.

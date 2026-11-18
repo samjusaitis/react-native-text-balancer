@@ -21,6 +21,11 @@ export type Sample = {
   // Substrings of `text` rendered as nested pressable spans, for checking taps and the press
   // highlight by eye.
   links?: string[];
+  // A `View` rendered inside the `Text`, straight after the first occurrence of `after`.
+  inlineView?: { after: string; width: number; height: number };
+  // Japanese line-start rules: the balanced copy must not start a line with closing punctuation
+  // or small kana.
+  kinsoku?: boolean;
 };
 
 export const SAMPLES: Sample[] = [
@@ -84,5 +89,81 @@ export const SAMPLES: Sample[] = [
     style: { fontSize: 22 },
     props: { selectable: true },
     links: ['linked words', 'still land on balanced'],
+  },
+  {
+    id: 'hyphenated',
+    label: 'Hyphenated compounds',
+    text: 'State-of-the-art, well-known and up-to-date cross-platform text-wrapping for real-world apps',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 22 },
+  },
+  {
+    id: 'soft-hyphen',
+    label: 'Soft-hyphen word',
+    text: 'Soft hyphens let Donau\u00ADdampf\u00ADschiff\u00ADfahrts\u00ADgesell\u00ADschaft break',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+  },
+  {
+    id: 'japanese',
+    label: 'Japanese, closing punctuation (kinsoku)',
+    text: '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+    kinsoku: true,
+  },
+  {
+    id: 'chinese',
+    label: 'Chinese',
+    text: '平衡文本换行让标题在每一行上看起来更加整齐，避免最后一行只剩下一两个字的情况。',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+  },
+  {
+    id: 'korean',
+    label: 'Korean, default',
+    text: '균형 잡힌 텍스트 줄바꿈은 제목을 여러 줄에 걸쳐 고르게 나누어 마지막 줄에 단어 하나만 남는 것을 막아 줍니다.',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+  },
+  {
+    // A different string from the default sample: RN's measure cache ignores lineBreakStrategy.
+    id: 'korean-hangul-word',
+    label: 'Korean, hangul-word',
+    text: '한글 단어 단위 줄바꿈에서도 제목이 고르게 나뉘어 보기 좋습니다.',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+    props: { lineBreakStrategyIOS: 'hangul-word' },
+  },
+  {
+    id: 'thai',
+    label: 'Thai',
+    text: 'การตัดบรรทัดข้อความให้สมดุลช่วยให้หัวข้อดูเรียบร้อยบนทุกหน้าจอและทุกอุปกรณ์ของผู้ใช้',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+  },
+  {
+    id: 'arabic-english',
+    label: 'Arabic mixed with English',
+    text: 'استخدم React Native لبناء تطبيقات iOS و Android بنص متوازن على كل الشاشات',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+  },
+  {
+    id: 'inline-view',
+    label: 'View inside Text',
+    text: 'This headline has an inline badge and its lines still balance',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 20 },
+    inlineView: { after: 'inline badge', width: 24, height: 14 },
   },
 ];

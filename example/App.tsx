@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, type TextLayoutEvent, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { check, distinct, undistinct, type Expectation, type Line, type Result } from './checks';
+import { check, distinct, kinsoku, undistinct, type Expectation, type Line, type Result } from './checks';
 import { SAMPLES, type Sample } from './samples';
 
 // Self-checking test screen. Each sample renders three times at a fixed width:
@@ -84,7 +84,7 @@ function SampleCard({
 
   const { stock, twin, test } = lines;
   const unchanged = stock && twin ? check('unchanged', stock, twin) : undefined;
-  const expected = stock && test ? check(sample.expect, stock, test) : undefined;
+  const expected = stock && test ? withKinsoku(sample, check(sample.expect, stock, test), test) : undefined;
 
   useEffect(() => {
     if (unchanged) onResult('unchanged', unchanged);
@@ -100,7 +100,10 @@ function SampleCard({
     sample.noFixedWidth ? { maxWidth: sample.width } : { width: sample.width },
   ];
   const content = (variant: number) =>
-    withLinks(distinct(sample.text, variant), sample.links, (link) => setPressed(link));
+    withInlineView(
+      withLinks(distinct(sample.text, variant), sample.links, (link) => setPressed(link)),
+      sample.inlineView
+    );
 
   return (
     <View style={styles.card}>
@@ -170,6 +173,29 @@ function withLinks(text: string, links: string[] | undefined, onPress: (link: st
   return parts;
 }
 
+// Adds the kinsoku check to a balanced result, for samples that ask for it.
+function withKinsoku(sample: Sample, result: Result, lines: Line[]): Result {
+  if (!sample.kinsoku) return result;
+  const k = kinsoku(lines);
+  return { pass: result.pass && k.pass, detail: `${result.detail} · ${k.detail}` };
+}
+
+// Puts a `View` inside the text, straight after `inlineView.after`.
+function withInlineView(content: ReactNode, inlineView: Sample['inlineView']) {
+  if (!inlineView || typeof content !== 'string') return content;
+  const at = content.indexOf(inlineView.after);
+  if (at < 0) return content;
+  const end = at + inlineView.after.length;
+  return [
+    content.slice(0, end),
+    <View
+      key="inline-view"
+      style={[styles.inlineView, { width: inlineView.width, height: inlineView.height }]}
+    />,
+    content.slice(end),
+  ];
+}
+
 // A view beside a `noFixedWidth` sample's text, to show where neighbouring layout lands.
 function Neighbour() {
   return <View style={styles.neighbour} />;
@@ -209,6 +235,7 @@ const styles = StyleSheet.create({
     borderColor: '#bbb',
   },
   text: { color: '#111' },
+  inlineView: { borderRadius: 3, backgroundColor: '#c33' },
   link: { color: '#06c', textDecorationLine: 'underline' },
   hidden: { position: 'absolute', opacity: 0, left: 12, top: 12 },
 });
