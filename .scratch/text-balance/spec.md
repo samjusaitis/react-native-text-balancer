@@ -2,7 +2,9 @@ Status: ready-for-agent
 
 # Spec: react-native-text-balancer, an iOS polyfill for `textBreakStrategy="balanced"`
 
-Map: [map.md](map.md). Decision record: [ADR 0001](../../docs/adr/0001-ios-polyfill-swizzle.md). Terms: [GLOSSARY.md](../../GLOSSARY.md) (**balance**, **stock wrapping**, **fallback**, **outermost Text**).
+Map: [map.md](map.md). Decision record: [ADR
+0001](../../docs/adr/0001-ios-polyfill-swizzle.md). Terms:
+[GLOSSARY.md](../../GLOSSARY.md) (**balance**, **stock wrapping**, **outermost Text**).
 
 ## Problem Statement
 
@@ -12,7 +14,11 @@ React Native's `Text` accepts `textBreakStrategy="balanced"`, but only Android h
 
 A small React Native library that, once installed, makes RN's own `textBreakStrategy="balanced"` balance on iOS, as it already does on Android. There's no new component, no new prop and no JS. Developers add the dependency, rebuild the iOS app, and write `<Text textBreakStrategy="balanced">` as they would for Android.
 
-On iOS the library replaces RN's private TextKit stack builder at load time, using method swizzling. For a paragraph whose `textBreakStrategy` is `balanced`, it plans line breaks that minimise raggedness at the same line count stock wrapping would use. It imposes that plan on TextKit and checks the result. Any paragraph it can't balance falls back to stock wrapping. On Android it does nothing.
+On iOS the library replaces RN's private TextKit stack builder at load time,
+using method swizzling. For a paragraph whose `textBreakStrategy` is `balanced`,
+it plans line breaks that minimise raggedness at the same line count stock
+wrapping would use. It imposes that plan on TextKit and checks the result. Any
+paragraph it can't balance falls back to stock wrapping. On Android it does nothing.
 
 It's distributed as a public GitHub repo, installed as a tag-pinned git dependency, with a README that lets anyone use it.
 
@@ -55,6 +61,7 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 ## Implementation Decisions
 
 **Package shape.**
+
 - It's a plain React Native library with iOS native code only, not an Expo module.
 - The existing Expo module scaffold goes entirely: the module config, the Swift and Kotlin module and view stubs, the TypeScript module, view and web files, the internal module scripts, the `android/` directory and the Expo dependencies. The ticket 04 prototype swizzle file also goes, replaced by the real implementation.
 - The package ships a `package.json`, the iOS sources, a podspec at the package root, and an RN CLI config that declares iOS only (`android: null`). There's no codegen, no `src/`, no build step and no TypeScript output.
@@ -62,12 +69,14 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 - Distribution: a public GitHub repo, installed as a git dependency pinned to a tag. It isn't published to npm. With no JS there's no `prepare` step.
 
 **The iOS hook** (ADR 0001).
+
 - From `+load`, replace the implementation of the private `-[RCTTextLayoutManager _textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:]`. Every RN text path builds its TextKit 1 stack through this method: measure, `onTextLayout` lines, draw and hit-test. So one hook keeps them all consistent.
 - **Guard:** swizzle only if the class and selector exist and the method's type encoding matches the expected signature. Otherwise leave RN untouched and log one dev warning per process.
 - The replacement calls the original first, so the storage is already font-scaled by `adjustsFontSizeToFit`. It acts only when `paragraphAttributes.textBreakStrategy == Balanced`. Every other `Text` returns exactly what the original returned.
 - RN's shared measure and lines caches key on `ParagraphAttributes`, which include `textBreakStrategy`. So balanced and stock layouts of the same string never share an entry.
 
 **Planning one paragraph** (tickets 08, 11 and 14).
+
 - Lay out at full width with unlimited lines to get the stock line count and group lines by paragraph. A paragraph with k ≤ 1 lines is left alone.
 - **Break candidates:** `CFStringTokenizer` line-break units (UAX #14, including kinsoku and dictionary breaking for Thai).
 - **Widths:** take logical-order advances from the paragraph's `CTRun` glyphs, prefix-summed by string index. Use the attachment `bounds` width for U+FFFC, strip trailing whitespace from each segment, and add the advance of `-` after a soft hyphen.
@@ -75,12 +84,14 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 - **Skip** (stock wrapping) when a paragraph contains a tab, when no k-line plan fits (one segment wider than the box), or when the text truncates at `numberOfLines`. Text that fits within `numberOfLines` balances to that count.
 
 **Imposing and checking the plan.**
+
 - Swap RN's text container for an `NSTextContainer` subclass. It returns each planned line's width from `lineFragmentRectForProposedRect:atIndex:…`, keyed by the line's start character index, plus 1–4pt of slack (half the gap to the next candidate). The last line of each paragraph keeps the full width. The container, and so the Yoga box, stays at the stock size.
 - Line rects sit on the stock text's alignment side: trailing for left-aligned, leading for right-aligned and RTL, centred for centred text.
 - **Check:** laid-out line starts must equal the plan. On a mismatch, run one repair retry. If that also fails, restore RN's container and leave that paragraph on stock wrapping. Fallback is per paragraph.
 - **Push-out:** while a checked plan is applied to a paragraph, clear `pushOut` from that paragraph's `lineBreakStrategy`. `standard` becomes `hangulWord`, and the hangul-word part is kept. On fallback, put back the original paragraph style. There's no warning. TextKit 1 currently ignores `pushOut` in RN, so this is about future-proofing more than visible behaviour.
 
 **Plan cache** (ticket 14).
+
 - An `NSCache` (`countLimit` 256) inside the hook.
 - **Key:** RN's input attributed string (compared with `isEqualToAttributedString:`, so string, fonts and paragraph style), width, `maximumNumberOfLines`, `adjustsFontSizeToFit`, and height when `adjustsFontSizeToFit` is on. Hash on string hash, width and max lines. Don't use `NSArray` hashing, which hashes by count.
 - **Value:** per paragraph, the planned line widths and side, or "stock", plus the ranges whose `pushOut` was cleared.

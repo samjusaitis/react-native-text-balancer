@@ -9,4 +9,7 @@ The library ships no `Text` component of its own. Installing it makes RN's own `
 
 ## Consequences
 
-We call a private method whose signature isn't a stable API. The swizzle checks the selector and its type encoding, and on a mismatch it falls back to stock layout with one dev warning. Each RN minor still needs an iOS build in `verify:matrix` before the tested range widens. A third-party `Text` that already sets `balanced` will balance on iOS too.
+We call a private method whose signature isn't a stable API. The swizzle checks
+the selector and its type encoding, and on a mismatch it falls back to stock
+wrapping with one dev warning. Each RN minor still needs an iOS build in `verify:matrix`
+before the tested range widens.
