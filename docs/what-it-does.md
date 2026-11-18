@@ -48,7 +48,7 @@ Thai, and other scripts that break lines the way Thai does, as well as some tric
 
 **The box doesn’t shrink to fit the balanced lines.** A `Text` without a fixed width takes up all the width it’s given, just as it does without the library, and as CSS does. Balancing makes the lines inside it shorter, but the box stays the same width, so a view sitting beside the text won’t move closer to it.
 
-**`push-out` is ignored on paragraphs that balance.** iOS’s `lineBreakStrategyIOS="push-out"` tries to avoid a short last line in its own way, which would fight with balancing. So while a paragraph is balanced, the library turns `push-out` off for that paragraph. If the paragraph falls back to default wrapping, it gets `push-out` back. (In practice React Native’s iOS text currently ignores `push-out` anyway, so you’re unlikely to see a difference.)
+**`lineBreakStrategyIOS` is left alone.** The library doesn’t change your text’s styles, including `lineBreakStrategyIOS="push-out"`, which tries to avoid a short last line in its own way. React Native’s iOS text currently ignores `push-out`, so it has no effect on balanced paragraphs or any others.
 
 **Other libraries’ `Text` balances too.** If a third-party component already sets `textBreakStrategy="balanced"` (for Android), it starts balancing on iOS as soon as you install this library. That’s on purpose: the prop now means the same thing on both platforms.
 

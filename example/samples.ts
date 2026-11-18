@@ -213,7 +213,7 @@ export const SAMPLES: Sample[] = [
     // A different string from the other samples: RN's measure cache ignores lineBreakStrategy.
     id: 'push-out-balanced',
     label: 'push-out, balancing paragraph',
-    text: 'With push-out set, this paragraph still balances because push-out is dropped while its breaks apply',
+    text: 'With push-out set, this paragraph still balances, since iOS text in React Native ignores push-out today',
     width: 240,
     expect: 'balanced',
     style: { fontSize: 22 },
@@ -222,7 +222,7 @@ export const SAMPLES: Sample[] = [
   {
     id: 'push-out-tab',
     label: 'push-out, tab paragraph (falls back)',
-    text: 'With push-out set,\ta paragraph that falls back keeps push-out on its original style',
+    text: 'With push-out set,\ta paragraph with a tab falls back to default wrapping as usual',
     width: 240,
     expect: 'default',
     style: { fontSize: 20 },
