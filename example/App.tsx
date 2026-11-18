@@ -93,34 +93,46 @@ function SampleCard({
     if (expected) onResult('expected', expected);
   }, [expected?.pass, expected?.detail]);
 
-  const textStyle = [styles.text, sample.style, { width: sample.width }];
+  // A `noFixedWidth` sample sets no width, only a maximum: its box comes from RN's measure.
+  const textStyle = [
+    styles.text,
+    sample.style,
+    sample.noFixedWidth ? { maxWidth: sample.width } : { width: sample.width },
+  ];
   const content = (variant: number) =>
     withLinks(distinct(sample.text, variant), sample.links, (link) => setPressed(link));
 
   return (
     <View style={styles.card}>
       <Text style={styles.label}>
-        {sample.label} · {sample.width}pt
+        {sample.label} · {sample.noFixedWidth ? '≤' : ''}
+        {sample.width}pt
       </Text>
       <Badge name="unchanged" result={unchanged} />
       <Badge name={sample.expect} result={expected} />
 
       <Text style={styles.caption}>stock</Text>
-      <View style={styles.box}>
-        <Text style={textStyle} {...sample.props} onTextLayout={onLayout('stock')}>
-          {content(0)}
-        </Text>
+      <View style={styles.row}>
+        <View style={styles.box}>
+          <Text style={textStyle} {...sample.props} onTextLayout={onLayout('stock')}>
+            {content(0)}
+          </Text>
+        </View>
+        {sample.noFixedWidth && <Neighbour />}
       </View>
 
       <Text style={styles.caption}>textBreakStrategy="balanced"</Text>
-      <View style={styles.box}>
-        <Text
-          style={textStyle}
-          {...sample.props}
-          textBreakStrategy="balanced"
-          onTextLayout={onLayout('test')}>
-          {content(1)}
-        </Text>
+      <View style={styles.row}>
+        <View style={styles.box}>
+          <Text
+            style={textStyle}
+            {...sample.props}
+            textBreakStrategy="balanced"
+            onTextLayout={onLayout('test')}>
+            {content(1)}
+          </Text>
+        </View>
+        {sample.noFixedWidth && <Neighbour />}
       </View>
       {sample.links && <Text style={styles.caption}>last press: {pressed ?? 'none'}</Text>}
 
@@ -158,6 +170,11 @@ function withLinks(text: string, links: string[] | undefined, onPress: (link: st
   return parts;
 }
 
+// A view beside a `noFixedWidth` sample's text, to show where neighbouring layout lands.
+function Neighbour() {
+  return <View style={styles.neighbour} />;
+}
+
 function Badge({ name, result }: { name: Expectation; result?: Result }) {
   return (
     <Text style={[styles.badge, result && !result.pass && styles.fail]}>
@@ -184,6 +201,8 @@ const styles = StyleSheet.create({
   badge: { fontSize: 12, color: '#262' },
   fail: { color: '#b00' },
   caption: { fontSize: 10, color: '#999', marginTop: 4 },
+  row: { flexDirection: 'row', alignItems: 'stretch', gap: 4 },
+  neighbour: { width: 12, borderRadius: 3, backgroundColor: '#e8a33d' },
   box: {
     alignSelf: 'flex-start',
     borderWidth: StyleSheet.hairlineWidth,

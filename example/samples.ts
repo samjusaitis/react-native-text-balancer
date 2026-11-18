@@ -10,7 +10,10 @@ export type Sample = {
   id: string;
   label: string;
   text: string;
-  width: number;
+  width: number; // the Text's width, or its maximum width when `noFixedWidth` is set
+  // Set no width, only `width` as a maximum, to check that the box keeps its stock size. Shown
+  // beside a neighbouring view.
+  noFixedWidth?: boolean;
   expect: Exclude<Expectation, 'unchanged'>;
   style?: TextStyle;
   // Extra props for every rendering of the sample (for example `selectable`).
@@ -64,6 +67,15 @@ export const SAMPLES: Sample[] = [
     style: { fontSize: 16 },
   },
   {
+    id: 'latin-no-fixed-width',
+    label: 'Latin headline, no fixed width',
+    text: 'Without a fixed width the box keeps its stock size while this headline balances',
+    width: 240,
+    noFixedWidth: true,
+    expect: 'balanced',
+    style: { fontSize: 24 },
+  },
+  {
     id: 'pressable-spans',
     label: 'Nested pressable spans, selectable',
     text: 'Tap the linked words in this headline to check that presses still land on balanced lines',
@@ -71,6 +83,6 @@ export const SAMPLES: Sample[] = [
     expect: 'balanced',
     style: { fontSize: 22 },
     props: { selectable: true },
-    links: ['linked words', 'presses still land'],
+    links: ['linked words', 'still land on balanced'],
   },
 ];
