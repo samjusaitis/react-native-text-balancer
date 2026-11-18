@@ -95,8 +95,9 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 - An `NSCache` (`countLimit` 256) inside the hook.
 - **Key:** RN's input attributed string (compared with `isEqualToAttributedString:`, so string, fonts and paragraph style), width, `maximumNumberOfLines`, `adjustsFontSizeToFit`, and height when `adjustsFontSizeToFit` is on. Hash on string hash, width and max lines. Don't use `NSArray` hashing, which hashes by count.
 - **Value:** per paragraph, the balanced line widths and side, or "stock", plus the ranges whose `pushOut` was cleared.
+- **Height:** outside `adjustsFontSizeToFit` it isn't in the key, so measure (unbounded height) and draw (the measured frame) share an entry. A container too short for the balanced lines cuts them off and falls back to stock, so the value records the height its lines need, and a shorter container counts as a miss. An outcome where RN's height cut lines off isn't cached.
 - There's no explicit invalidation, because the key covers everything the balanced breaks depend on (Dynamic Type changes the fonts). `NSCache` evicts under memory pressure.
-- Measured effect: a hit costs 0.005ms, and mean overhead falls from 0.68ms to 0.25ms per build.
+- Measured effect: a hit costs 0.005ms, and mean overhead falls from 0.68ms to 0.25ms per build (prototype); in the build, 0.41ms to 0.17ms (ticket 05).
 
 **Performance budget:** a Release median of about 0.5ms and a p90 of about 1.4ms per uncached build. Korean, Thai and Arabic paragraphs set the p90.
 

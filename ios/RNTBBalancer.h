@@ -1,5 +1,19 @@
 #import <UIKit/UIKit.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
+// What RNTBBalanceTextStorage applied to a storage: each balanced line's width and side, keyed by
+// where the line starts, and the paragraph style runs whose `pushOut` it cleared. No balanced lines
+// means stock wrapping. Immutable, so the break cache can share it across threads.
+@interface RNTBBalancedBreaks : NSObject
+// The storage on stock wrapping.
+@property (class, nonatomic, readonly) RNTBBalancedBreaks *stock;
+// The height these lines need: in a shorter container TextKit cuts lines off, and balancing there
+// gives a different outcome. 0 for stock wrapping, which a shorter container doesn't change.
+@property (nonatomic, readonly) CGFloat minimumHeight;
+- (instancetype)init NS_UNAVAILABLE;
+@end
+
 // Balances the paragraphs of a TextKit 1 stack that React Native has just built, in place.
 //
 // `storage` has one layout manager with one text container, as RN's stack builder returns it. Each
@@ -12,4 +26,15 @@
 // (0 = unlimited) is left exactly as stock; text that fits balances to its line count. While balanced
 // breaks are applied to a paragraph, `pushOut` is cleared from its line-break strategy; a paragraph on stock
 // wrapping keeps its original style.
-void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLines);
+//
+// Returns what it applied, for RNTBApplyBalancedBreaks to reapply to a stack built from the same
+// input. Returns nil when the container's height cut lines off, because then the outcome depends
+// on that height.
+RNTBBalancedBreaks *_Nullable RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLines);
+
+// Applies balanced breaks that RNTBBalanceTextStorage returned for a stack built from the same input
+// (attributed string, paragraph attributes and width) to this one, without choosing or checking
+// them again. The lines come out identical, as long as the container is at least `minimumHeight` tall.
+void RNTBApplyBalancedBreaks(NSTextStorage *storage, RNTBBalancedBreaks *breaks);
+
+NS_ASSUME_NONNULL_END

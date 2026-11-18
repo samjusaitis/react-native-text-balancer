@@ -71,24 +71,30 @@ using RNTBLineMap = std::unordered_map<NSUInteger, RNTBLine>;
 
 @end
 
-// A stock line: where it starts, and where its text sits in the container.
+// A laid-out line: where it starts, its line fragment, and where its text sits in it.
 struct RNTBStockLine {
   NSUInteger start;
+  CGRect rect;
   CGRect used;
 };
 
-static std::vector<RNTBStockLine> layOut(NSLayoutManager *layoutManager, NSTextContainer *container)
+// Lays the storage out in `container` and returns its lines. `complete` says whether every glyph
+// found room; it's false when the container's height or line limit cut lines off.
+static std::vector<RNTBStockLine> layOut(NSLayoutManager *layoutManager, NSTextContainer *container, bool *complete = nullptr)
 {
   [layoutManager ensureLayoutForTextContainer:container];
   __block std::vector<RNTBStockLine> lines;
   NSRange glyphRange = [layoutManager glyphRangeForTextContainer:container];
   [layoutManager enumerateLineFragmentsForGlyphRange:glyphRange
-                                          usingBlock:^(CGRect, CGRect used, NSTextContainer *, NSRange glyphs, BOOL *) {
+                                          usingBlock:^(CGRect rect, CGRect used, NSTextContainer *, NSRange glyphs, BOOL *) {
                                             NSUInteger start = [layoutManager characterRangeForGlyphRange:glyphs
                                                                                          actualGlyphRange:NULL]
                                                                    .location;
-                                            lines.push_back({start, used});
+                                            lines.push_back({start, rect, used});
                                           }];
+  if (complete != nullptr) {
+    *complete = NSMaxRange(glyphRange) >= layoutManager.numberOfGlyphs;
+  }
   return lines;
 }
 
@@ -373,6 +379,13 @@ static std::vector<NSUInteger> startsIn(const std::vector<RNTBStockLine> &lines,
   return starts;
 }
 
+static NSParagraphStyle *withoutPushOut(NSParagraphStyle *style)
+{
+  NSMutableParagraphStyle *cleared = [style mutableCopy];
+  cleared.lineBreakStrategy = style.lineBreakStrategy & NSLineBreakStrategyHangulWordPriority;
+  return cleared;
+}
+
 // The push-out rule: while checked balanced breaks are applied to a paragraph, pushOut is cleared
 // from its lineBreakStrategy, because it fights them; `standard` becomes hangul-word only. A paragraph
 // on stock wrapping has its original style. TextKit 1 ignores pushOut in RN today, so this keeps
@@ -404,13 +417,9 @@ static void syncPushOut(NSTextStorage *storage, std::vector<RNTBParagraph> &para
       changed = true;
     }
     for (const auto &run : p.pushOutStyles) {
-      NSParagraphStyle *style = run.second;
-      if (clear) {
-        NSMutableParagraphStyle *cleared = [style mutableCopy];
-        cleared.lineBreakStrategy = style.lineBreakStrategy & NSLineBreakStrategyHangulWordPriority;
-        style = cleared;
-      }
-      [storage addAttribute:NSParagraphStyleAttributeName value:style range:run.first];
+      [storage addAttribute:NSParagraphStyleAttributeName
+                      value:clear ? withoutPushOut(run.second) : run.second
+                      range:run.first];
     }
     p.pushOutCleared = clear;
   }
@@ -432,17 +441,81 @@ static void fill(RNTBLineWidthContainer *container, const std::vector<RNTBParagr
   }
 }
 
-void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLines)
+@interface RNTBBalancedBreaks ()
+- (instancetype)initWithLines:(RNTBLineMap)lines
+                  pushOutRuns:(std::vector<NSRange>)pushOutRuns
+                minimumHeight:(CGFloat)minimumHeight;
+- (const RNTBLineMap &)lines;
+- (const std::vector<NSRange> &)pushOutRuns;
+@end
+
+@implementation RNTBBalancedBreaks {
+  RNTBLineMap _lines;
+  std::vector<NSRange> _pushOutRuns;
+}
+
++ (RNTBBalancedBreaks *)stock
 {
-  NSLayoutManager *layoutManager = storage.layoutManagers.firstObject;
-  NSTextContainer *container = layoutManager.textContainers.firstObject;
-  if (storage.length == 0 || layoutManager.textContainers.count != 1 || container == nil) {
-    return;
+  static RNTBBalancedBreaks *stock = [[RNTBBalancedBreaks alloc] initWithLines:RNTBLineMap() pushOutRuns:std::vector<NSRange>() minimumHeight:0];
+  return stock;
+}
+
+- (instancetype)initWithLines:(RNTBLineMap)lines
+                  pushOutRuns:(std::vector<NSRange>)pushOutRuns
+                minimumHeight:(CGFloat)minimumHeight
+{
+  if (self = [super init]) {
+    _lines = std::move(lines);
+    _pushOutRuns = std::move(pushOutRuns);
+    _minimumHeight = minimumHeight;
+  }
+  return self;
+}
+
+- (const RNTBLineMap &)lines
+{
+  return _lines;
+}
+
+- (const std::vector<NSRange> &)pushOutRuns
+{
+  return _pushOutRuns;
+}
+
+@end
+
+// The storage's one layout manager and text container, as RN's stack builder returns them, if the
+// container has a width the hook can balance in.
+static bool stackOf(NSTextStorage *storage, NSLayoutManager **layoutManager, NSTextContainer **container)
+{
+  *layoutManager = storage.layoutManagers.firstObject;
+  *container = (*layoutManager).textContainers.firstObject;
+  if (storage.length == 0 || (*layoutManager).textContainers.count != 1 || *container == nil) {
+    return false;
+  }
+  CGFloat width = (*container).size.width;
+  return isfinite(width) && width > 0 && width <= 100000;
+}
+
+// A width container with RN's container's configuration, except its size.
+static RNTBLineWidthContainer *widthContainerLike(NSTextContainer *container, CGSize size)
+{
+  RNTBLineWidthContainer *widthContainer = [[RNTBLineWidthContainer alloc] initWithSize:size];
+  widthContainer.lineFragmentPadding = container.lineFragmentPadding;
+  widthContainer.maximumNumberOfLines = container.maximumNumberOfLines;
+  widthContainer.lineBreakMode = container.lineBreakMode;
+  widthContainer.exclusionPaths = container.exclusionPaths;
+  return widthContainer;
+}
+
+RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLines)
+{
+  NSLayoutManager *layoutManager;
+  NSTextContainer *container;
+  if (!stackOf(storage, &layoutManager, &container)) {
+    return RNTBBalancedBreaks.stock;
   }
   CGSize size = container.size;
-  if (!isfinite(size.width) || size.width <= 0 || size.width > 100000) {
-    return;
-  }
 
   // All the work happens in our own container; RN's is never changed, so giving it back is exactly
   // stock. Every change to a container's geometry makes TextKit lay the whole storage out again,
@@ -453,11 +526,9 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
   // untruncated and unbounded in height, so every line shows up and none is cut off.
   CGFloat padding = container.lineFragmentPadding;
   RNTBLineWidthContainer *widthContainer =
-      [[RNTBLineWidthContainer alloc] initWithSize:CGSizeMake(size.width, MAX(size.height, kUnboundedHeight))];
-  widthContainer.lineFragmentPadding = padding;
+      widthContainerLike(container, CGSizeMake(size.width, MAX(size.height, kUnboundedHeight)));
   widthContainer.maximumNumberOfLines = 0;
   widthContainer.lineBreakMode = container.maximumNumberOfLines == 0 ? container.lineBreakMode : NSLineBreakByWordWrapping;
-  widthContainer.exclusionPaths = container.exclusionPaths;
   [layoutManager removeTextContainerAtIndex:0];
   [layoutManager addTextContainer:widthContainer];
   auto restoreStock = [&]() {
@@ -468,7 +539,7 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
   std::vector<RNTBStockLine> stock = layOut(layoutManager, widthContainer);
   if (maximumNumberOfLines > 0 && stock.size() > maximumNumberOfLines) {
     restoreStock(); // truncates: stock wrapping and stock ellipsis
-    return;
+    return RNTBBalancedBreaks.stock;
   }
 
   // Group the stock lines by paragraph and choose balanced breaks for each paragraph that wraps.
@@ -508,7 +579,7 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
   }
   if (!anyBalanced) {
     restoreStock();
-    return;
+    return RNTBBalancedBreaks.stock;
   }
 
   // Impose the balanced breaks at RN's geometry, then check that each balanced paragraph's lines
@@ -525,8 +596,13 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
   [layoutManager textContainerChangedGeometry:widthContainer];
 
   bool holds = false;
+  bool cut = false; // RN's height (or line limit) cut lines off in some pass
+  CGFloat bottom = 0;
   for (int pass = 0; pass < 4 && !holds; pass++) {
-    std::vector<RNTBStockLine> laidOut = layOut(layoutManager, widthContainer);
+    bool complete;
+    std::vector<RNTBStockLine> laidOut = layOut(layoutManager, widthContainer, &complete);
+    cut = cut || !complete;
+    bottom = laidOut.empty() ? 0 : CGRectGetMaxY(laidOut.back().rect);
     holds = true;
     anyBalanced = false;
     for (RNTBParagraph &p : paragraphs) {
@@ -557,4 +633,42 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
     syncPushOut(storage, paragraphs, true);
     restoreStock(); // RN's own container and styles: exactly stock
   }
+  // Lines cut off by RN's height make the outcome depend on that height, which the break cache
+  // doesn't key on (only on the width), so it isn't reusable.
+  if (cut) {
+    return nil;
+  }
+  if (!holds || !anyBalanced) {
+    return RNTBBalancedBreaks.stock;
+  }
+  std::vector<NSRange> pushOutRuns;
+  for (const RNTBParagraph &p : paragraphs) {
+    if (p.balanced) {
+      for (const auto &run : p.pushOutStyles) {
+        pushOutRuns.push_back(run.first);
+      }
+    }
+  }
+  return [[RNTBBalancedBreaks alloc] initWithLines:[widthContainer lines] pushOutRuns:pushOutRuns minimumHeight:bottom];
+}
+
+void RNTBApplyBalancedBreaks(NSTextStorage *storage, RNTBBalancedBreaks *breaks)
+{
+  NSLayoutManager *layoutManager;
+  NSTextContainer *container;
+  if ([breaks lines].empty() || !stackOf(storage, &layoutManager, &container)) {
+    return; // stock: RN's own stack as it is
+  }
+  if (![breaks pushOutRuns].empty()) {
+    [storage beginEditing];
+    for (NSRange run : [breaks pushOutRuns]) {
+      NSParagraphStyle *style = [storage attribute:NSParagraphStyleAttributeName atIndex:run.location effectiveRange:NULL];
+      [storage addAttribute:NSParagraphStyleAttributeName value:withoutPushOut(style) range:run];
+    }
+    [storage endEditing];
+  }
+  RNTBLineWidthContainer *widthContainer = widthContainerLike(container, container.size);
+  [widthContainer lines] = [breaks lines];
+  [layoutManager removeTextContainerAtIndex:0];
+  [layoutManager addTextContainer:widthContainer];
 }
