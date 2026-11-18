@@ -154,5 +154,7 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
   - Thai-family scripts and kinsoku edge cases may fall back.
   - A paragraph can still end in an orphan if it falls back, or if its only break points force one.
   - A third-party `Text` that sets `balanced` will balance on iOS too.
+  - A wrapped `Text` without a fixed width keeps the stock box width, which is the full available width, as stock RN and CSS `text-wrap: balance` do. The box doesn't shrink to the widest balanced line, so a view beside it doesn't move closer.
+- **Future idea: a box that fits the balanced lines** (Sam, 2026-11-18). On iOS, the hook could make the container only as wide as the widest balanced line while RN measures, so RN reports that width. A view beside the text would then sit against it. Not built. It would make balanced text differ from stock RN and from CSS, so it would have to be opt-in or a deliberate change to this spec.
 - **The swizzle depends on a private RN method.** Its signature has been unchanged from RN 0.85 through `main` (ticket 10). The type-encoding guard turns a future change into stock layout plus a warning, not a crash.
 - **Decision detail lives in the tickets.** The Decisions so far in [map.md](map.md) link each one: 08 (algorithm), 11 and 14 (inputs, cost and cache), 12 (fallback and `numberOfLines` semantics, with the push-out amendment) and 15 (delivery). Tickets 09, 10 and 13 are partly superseded by 15.

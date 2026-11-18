@@ -13,6 +13,7 @@ Spec: [spec.md](../../text-balance/spec.md) (Solution; Further Notes). Terms: [G
   back to stock wrapping (tabs, an over-wide word, truncating text; Thai-family
   and kinsoku edge cases may fall back).
 - The orphan caveat, the `push-out` behaviour, and that a third-party `Text` setting `balanced` will balance too.
+- The box keeps the stock width: a wrapped `Text` without a fixed width takes the full available width, as in stock RN and CSS. It doesn't shrink to the widest balanced line.
 - On Android, switching `textBreakStrategy` at runtime needs a `key` change to re-apply.
 - Why it swizzles a private RN method, how the guard fails safe, and how to run the example app and `verify:matrix`.
 
