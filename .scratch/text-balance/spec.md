@@ -132,7 +132,7 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
   - fallback cases: a tab, a word wider than the box, and `push-out` on both a balancing paragraph and a falling-back one.
 - **Gotcha:** give each sample a distinct string, for example by inserting U+2060. RN's text measure cache ignores `lineBreakStrategy`, so two `Text`s with the same string share one `onTextLayout` result.
 - **Build gate:** `verify:matrix`, a local script run before each release and when a new RN minor or RC appears.
-  - For each RN minor from 0.85 up, plus the current RC, it creates a fresh bare app, installs the package, runs `pod install` and a Debug simulator build.
+  - For each RN minor from 0.85 up, plus the current RC, it creates a fresh bare app, installs the package as a git dependency on a local commit (`git+file://…#<commit>`), checks the installed package holds only the shipped files, runs `pod install` and a Debug simulator build.
   - It also builds the Expo example for iOS and Android.
   - It prints a pass/fail table. A full pass gates a release and widening the documented RN range.
 - **No JS unit tests** (there is no JS) and no native unit tests. A lower seam beneath RN was considered and not chosen.
