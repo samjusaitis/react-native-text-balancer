@@ -8,6 +8,10 @@ An iOS polyfill that makes React Native's `textBreakStrategy="balanced"` even ou
 Line breaks chosen to minimise raggedness, so a paragraph's lines are as close to the same length as possible without adding lines.
 _Avoid_: Even wrapping, squeeze, Knuth-Plass
 
+**Balanced breaks**:
+The line breaks the library chooses for one paragraph so it **balances**: where each line starts, and so how wide each line is. They're chosen from the paragraph's break candidates (every place a line could break), imposed on TextKit, then checked. A paragraph whose balanced breaks don't fit or don't hold keeps **stock wrapping**.
+_Avoid_: Plan, layout
+
 **Stock wrapping**:
 Exactly what React Native's own `Text` does without the library: its own line breaks, stock wrapping and layout.
 _Avoid_: Default layout, unbalanced layout

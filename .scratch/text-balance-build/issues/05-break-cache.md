@@ -1,12 +1,12 @@
-# 05: Plan cache
+# 05: Break cache
 
-Spec: [spec.md](../../text-balance/spec.md) (Plan cache). Detail: ticket 14 in [the map](../../text-balance/map.md).
+Spec: [spec.md](../../text-balance/spec.md) (Break cache). Detail: ticket 14 in [the map](../../text-balance/map.md).
 
-**What to build:** repeated layouts of the same balanced text reuse the earlier plan. Drawing on the main thread and hit-testing cost almost nothing, while the lines stay identical.
+**What to build:** repeated layouts of the same balanced text reuse the earlier balanced breaks. Drawing on the main thread and hit-testing cost almost nothing, while the lines stay identical.
 
 - An `NSCache` (count limit 256) inside the hook.
 - **Key:** RN's input attributed string (compared for equality, so string, fonts and paragraph style), width, max lines, `adjustsFontSizeToFit`, and height when `adjustsFontSizeToFit` is on. Don't hash a collection by count.
-- **Value:** per paragraph, the planned line widths and side or "stock", plus the ranges whose `pushOut` was cleared, so that a hit clears them again.
+- **Value:** per paragraph, the balanced line widths and side or "stock", plus the ranges whose `pushOut` was cleared, so that a hit clears them again.
 - There's no explicit invalidation. Dynamic Type changes fonts, and therefore the key.
 
 **Blocked by:** 03, 04.

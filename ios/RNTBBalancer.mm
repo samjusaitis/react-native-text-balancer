@@ -20,14 +20,14 @@ struct RNTBLine {
 
 using RNTBLineMap = std::unordered_map<NSUInteger, RNTBLine>;
 
-// Returns each planned line's width, keyed by the character index the line starts at. Lines it has
+// Returns each balanced line's width, keyed by the character index the line starts at. Lines it has
 // no entry for (the last line of each paragraph, and every line of a stock paragraph) keep the full
 // width. The container itself stays at RN's size, so the Yoga box and drawing frame are unchanged.
-@interface RNTBPlanContainer : NSTextContainer
+@interface RNTBLineWidthContainer : NSTextContainer
 - (RNTBLineMap &)lines;
 @end
 
-@implementation RNTBPlanContainer {
+@implementation RNTBLineWidthContainer {
   RNTBLineMap _lines;
 }
 
@@ -97,13 +97,17 @@ struct RNTBParagraph {
   NSRange full; // including its line terminator
   NSRange content; // without it
   std::vector<RNTBStockLine> stock; // its lines under stock wrapping
-  bool planned = false;
+  bool balanced = false;
   bool repaired = false; // has had its one repair retry
-  std::vector<NSUInteger> starts; // planned line starts (absolute)
-  std::vector<std::pair<NSUInteger, CGFloat>> widths; // planned line start -> rect width, all but the last line
+  std::vector<NSUInteger> breaks; // balanced breaks: the line starts chosen (absolute)
+  std::vector<std::pair<NSUInteger, CGFloat>> widths; // balanced line start -> rect width, all but the last line
   RNTBSide side = RNTBSide::Left;
+  // Paragraph style runs whose lineBreakStrategy has pushOut, with their original style, and
+  // whether pushOut is currently cleared from them in the storage.
+  std::vector<std::pair<NSRange, NSParagraphStyle *>> pushOutStyles;
+  bool pushOutCleared = false;
 
-  // Plan inputs, relative to `content`.
+  // Inputs to chooseBreaks, relative to `content`.
   std::vector<unichar> chars;
   std::vector<CGFloat> prefix; // logical-order advance sum before each index
   std::vector<NSUInteger> candidates; // possible line starts, sorted, including 0 and the length
@@ -252,9 +256,9 @@ static CGFloat hyphenAdvance(const RNTBParagraph &p, NSUInteger i)
   return CTFontGetAdvancesForGlyphs((__bridge CTFontRef)font, kCTFontOrientationHorizontal, &glyph, NULL, 1);
 }
 
-// Plans the paragraph at its stock line count k: the k-line split of its candidates minimising
-// Σ(U − wᵢ)² with no line wider than U. Returns false if no k-line plan fits.
-static bool plan(RNTBParagraph &p, CGFloat U, CGFloat padding)
+// Chooses the paragraph's balanced breaks at its stock line count k: the k-line split of its
+// candidates minimising Σ(U − wᵢ)² with no line wider than U. Returns false if no k-line split fits.
+static bool chooseBreaks(RNTBParagraph &p, CGFloat U, CGFloat padding)
 {
   size_t k = p.stock.size();
   const std::vector<NSUInteger> &c = p.candidates;
@@ -319,12 +323,12 @@ static bool plan(RNTBParagraph &p, CGFloat U, CGFloat padding)
   for (size_t l = k; l > 0; l--) {
     bounds[l - 1] = from[at(l, bounds[l])];
   }
-  p.starts.clear();
+  p.breaks.clear();
   p.widths.clear();
   for (size_t l = 0; l < k; l++) {
     size_t a = bounds[l], b = bounds[l + 1];
     NSUInteger start = p.content.location + c[a];
-    p.starts.push_back(start);
+    p.breaks.push_back(start);
     if (b == m) {
       continue; // the last line keeps the full width
     }
@@ -337,24 +341,24 @@ static bool plan(RNTBParagraph &p, CGFloat U, CGFloat padding)
   return true;
 }
 
-// The one repair retry: at the first line start where TextKit disagreed with the plan, drop the
-// planned candidate, take TextKit's break as a candidate instead, and plan again.
+// The one repair retry: at the first line start where TextKit disagreed with the balanced breaks,
+// drop the chosen candidate, take TextKit's break as a candidate instead, and choose again.
 static bool repair(RNTBParagraph &p, const std::vector<NSUInteger> &got, CGFloat U, CGFloat padding)
 {
   size_t d = 0;
-  while (d < got.size() && d < p.starts.size() && got[d] == p.starts[d]) {
+  while (d < got.size() && d < p.breaks.size() && got[d] == p.breaks[d]) {
     d++;
   }
   NSUInteger first = p.content.location, last = NSMaxRange(p.content);
   std::vector<NSUInteger> &c = p.candidates;
-  if (d < p.starts.size() && p.starts[d] > first && p.starts[d] < last) {
-    c.erase(std::remove(c.begin(), c.end(), p.starts[d] - first), c.end());
+  if (d < p.breaks.size() && p.breaks[d] > first && p.breaks[d] < last) {
+    c.erase(std::remove(c.begin(), c.end(), p.breaks[d] - first), c.end());
   }
   if (d < got.size() && got[d] > first && got[d] < last) {
     c.insert(std::lower_bound(c.begin(), c.end(), got[d] - first), got[d] - first);
     c.erase(std::unique(c.begin(), c.end()), c.end());
   }
-  return plan(p, U, padding);
+  return chooseBreaks(p, U, padding);
 }
 
 // Line starts TextKit laid out inside `p`.
@@ -369,11 +373,57 @@ static std::vector<NSUInteger> startsIn(const std::vector<RNTBStockLine> &lines,
   return starts;
 }
 
-static void fill(RNTBPlanContainer *container, const std::vector<RNTBParagraph> &paragraphs)
+// The push-out rule: while checked balanced breaks are applied to a paragraph, pushOut is cleared
+// from its lineBreakStrategy, because it fights them; `standard` becomes hangul-word only. A paragraph
+// on stock wrapping has its original style. TextKit 1 ignores pushOut in RN today, so this keeps
+// the user's setting for when it doesn't, rather than changing what's drawn now.
+static void findPushOut(NSTextStorage *storage, RNTBParagraph &p)
+{
+  [storage enumerateAttribute:NSParagraphStyleAttributeName
+                      inRange:p.content
+                      options:0
+                   usingBlock:^(NSParagraphStyle *style, NSRange range, BOOL *) {
+                     if (style != nil && (style.lineBreakStrategy & NSLineBreakStrategyPushOut)) {
+                       p.pushOutStyles.push_back({range, style});
+                     }
+                   }];
+}
+
+// Brings each paragraph's style in line with its state: pushOut cleared on balanced paragraphs,
+// the original style back on the rest.
+static void syncPushOut(NSTextStorage *storage, std::vector<RNTBParagraph> &paragraphs, bool stock)
+{
+  bool changed = false;
+  for (RNTBParagraph &p : paragraphs) {
+    bool clear = p.balanced && !stock;
+    if (p.pushOutStyles.empty() || clear == p.pushOutCleared) {
+      continue;
+    }
+    if (!changed) {
+      [storage beginEditing];
+      changed = true;
+    }
+    for (const auto &run : p.pushOutStyles) {
+      NSParagraphStyle *style = run.second;
+      if (clear) {
+        NSMutableParagraphStyle *cleared = [style mutableCopy];
+        cleared.lineBreakStrategy = style.lineBreakStrategy & NSLineBreakStrategyHangulWordPriority;
+        style = cleared;
+      }
+      [storage addAttribute:NSParagraphStyleAttributeName value:style range:run.first];
+    }
+    p.pushOutCleared = clear;
+  }
+  if (changed) {
+    [storage endEditing];
+  }
+}
+
+static void fill(RNTBLineWidthContainer *container, const std::vector<RNTBParagraph> &paragraphs)
 {
   [container lines].clear();
   for (const RNTBParagraph &p : paragraphs) {
-    if (!p.planned) {
+    if (!p.balanced) {
       continue;
     }
     for (const auto &w : p.widths) {
@@ -396,32 +446,32 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
 
   // All the work happens in our own container; RN's is never changed, so giving it back is exactly
   // stock. Every change to a container's geometry makes TextKit lay the whole storage out again,
-  // so the plan container changes geometry once: from counting to RN's, before the check. (Moving
+  // so the width container changes geometry once: from counting to RN's, before the check. (Moving
   // RN's container to the counting geometry and back cost two extra layouts per build.)
   //
-  // First, count stock lines (the plan container with no planned lines lays out as RN's does),
+  // First, count stock lines (the width container with no line widths lays out as RN's does),
   // untruncated and unbounded in height, so every line shows up and none is cut off.
   CGFloat padding = container.lineFragmentPadding;
-  RNTBPlanContainer *planContainer =
-      [[RNTBPlanContainer alloc] initWithSize:CGSizeMake(size.width, MAX(size.height, kUnboundedHeight))];
-  planContainer.lineFragmentPadding = padding;
-  planContainer.maximumNumberOfLines = 0;
-  planContainer.lineBreakMode = container.maximumNumberOfLines == 0 ? container.lineBreakMode : NSLineBreakByWordWrapping;
-  planContainer.exclusionPaths = container.exclusionPaths;
+  RNTBLineWidthContainer *widthContainer =
+      [[RNTBLineWidthContainer alloc] initWithSize:CGSizeMake(size.width, MAX(size.height, kUnboundedHeight))];
+  widthContainer.lineFragmentPadding = padding;
+  widthContainer.maximumNumberOfLines = 0;
+  widthContainer.lineBreakMode = container.maximumNumberOfLines == 0 ? container.lineBreakMode : NSLineBreakByWordWrapping;
+  widthContainer.exclusionPaths = container.exclusionPaths;
   [layoutManager removeTextContainerAtIndex:0];
-  [layoutManager addTextContainer:planContainer];
+  [layoutManager addTextContainer:widthContainer];
   auto restoreStock = [&]() {
     [layoutManager removeTextContainerAtIndex:0];
     [layoutManager addTextContainer:container];
   };
 
-  std::vector<RNTBStockLine> stock = layOut(layoutManager, planContainer);
+  std::vector<RNTBStockLine> stock = layOut(layoutManager, widthContainer);
   if (maximumNumberOfLines > 0 && stock.size() > maximumNumberOfLines) {
     restoreStock(); // truncates: stock wrapping and stock ellipsis
     return;
   }
 
-  // Group the stock lines by paragraph and plan each paragraph that wraps.
+  // Group the stock lines by paragraph and choose balanced breaks for each paragraph that wraps.
   NSString *string = storage.string;
   std::vector<RNTBParagraph> paragraphs;
   for (const RNTBStockLine &line : stock) {
@@ -440,64 +490,71 @@ void RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLi
   }
 
   CGFloat U = size.width - 2 * padding;
-  bool anyPlanned = false;
+  bool anyBalanced = false;
   for (RNTBParagraph &p : paragraphs) {
     if (p.stock.size() <= 1 || p.content.length == 0) {
       continue;
     }
+    if ([string rangeOfString:@"\t" options:NSLiteralSearch range:p.content].location != NSNotFound) {
+      continue; // a tab's width depends on where it lands: stock wrapping
+    }
     gatherInputs(storage, p);
-    if (plan(p, U, padding)) {
-      p.planned = true;
+    if (chooseBreaks(p, U, padding)) {
+      p.balanced = true;
       p.side = sideOf(storage, p, size.width);
-      anyPlanned = true;
+      findPushOut(storage, p);
+      anyBalanced = true;
     }
   }
-  if (!anyPlanned) {
+  if (!anyBalanced) {
     restoreStock();
     return;
   }
 
-  // Impose the plan at RN's geometry, then check that each planned paragraph's lines start where
-  // planned. A paragraph that doesn't hold gets one repair retry, then drops back to stock
+  // Impose the balanced breaks at RN's geometry, then check that each balanced paragraph's lines
+  // start at its breaks. A paragraph that doesn't hold gets one repair retry, then drops back to stock
   // wrapping. Paragraphs lay out independently (each starts on a fresh line), so that doesn't move
   // the others; the next pass confirms it. If RN's height cuts lines off, nothing holds: stock.
   // Setting a geometry that hasn't changed (measure's height is already unbounded) doesn't
-  // invalidate the layout, and nor does the plan, so invalidate it explicitly.
-  fill(planContainer, paragraphs);
-  planContainer.size = size;
-  planContainer.maximumNumberOfLines = container.maximumNumberOfLines;
-  planContainer.lineBreakMode = container.lineBreakMode;
-  [layoutManager textContainerChangedGeometry:planContainer];
+  // invalidate the layout, and nor do the line widths, so invalidate it explicitly.
+  syncPushOut(storage, paragraphs, false);
+  fill(widthContainer, paragraphs);
+  widthContainer.size = size;
+  widthContainer.maximumNumberOfLines = container.maximumNumberOfLines;
+  widthContainer.lineBreakMode = container.lineBreakMode;
+  [layoutManager textContainerChangedGeometry:widthContainer];
 
   bool holds = false;
   for (int pass = 0; pass < 4 && !holds; pass++) {
-    std::vector<RNTBStockLine> laidOut = layOut(layoutManager, planContainer);
+    std::vector<RNTBStockLine> laidOut = layOut(layoutManager, widthContainer);
     holds = true;
-    anyPlanned = false;
+    anyBalanced = false;
     for (RNTBParagraph &p : paragraphs) {
       std::vector<NSUInteger> got = startsIn(laidOut, p);
-      std::vector<NSUInteger> want = p.planned ? p.starts : startsIn(p.stock, p);
+      std::vector<NSUInteger> want = p.balanced ? p.breaks : startsIn(p.stock, p);
       if (got != want) {
         holds = false;
-        if (p.planned && !p.repaired) {
+        if (p.balanced && !p.repaired) {
           p.repaired = true;
-          p.planned = repair(p, got, U, padding);
+          p.balanced = repair(p, got, U, padding);
         } else {
-          p.planned = false;
+          p.balanced = false;
         }
       }
-      anyPlanned = anyPlanned || p.planned;
+      anyBalanced = anyBalanced || p.balanced;
     }
-    if (!anyPlanned) {
+    if (!anyBalanced) {
       break;
     }
     if (!holds) {
-      fill(planContainer, paragraphs);
-      [layoutManager textContainerChangedGeometry:planContainer];
+      syncPushOut(storage, paragraphs, false);
+      fill(widthContainer, paragraphs);
+      [layoutManager textContainerChangedGeometry:widthContainer];
     }
   }
 
-  if (!holds || !anyPlanned) {
-    restoreStock(); // RN's own container: exactly stock
+  if (!holds || !anyBalanced) {
+    syncPushOut(storage, paragraphs, true);
+    restoreStock(); // RN's own container and styles: exactly stock
   }
 }

@@ -16,8 +16,8 @@ A small React Native library that, once installed, makes RN's own `textBreakStra
 
 On iOS the library replaces RN's private TextKit stack builder at load time,
 using method swizzling. For a paragraph whose `textBreakStrategy` is `balanced`,
-it plans line breaks that minimise raggedness at the same line count stock
-wrapping would use. It imposes that plan on TextKit and checks the result. Any
+it chooses **balanced breaks**: line breaks that minimise raggedness at the same line count stock
+wrapping would use. It imposes those breaks on TextKit and checks the result. Any
 paragraph it can't balance falls back to stock wrapping. On Android it does nothing.
 
 It's distributed as a public GitHub repo, installed as a tag-pinned git dependency, with a README that lets anyone use it.
@@ -46,7 +46,7 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 20. As an app developer, I want `lineBreakStrategyIOS="push-out"` to be ignored only where balancing applies, and kept on paragraphs that fall back, so that my settings aren't silently lost.
 21. As an app developer, I want one dev warning if the library can't hook RN on my RN version, and stock layout otherwise, so that an RN upgrade never crashes my app.
 22. As an app developer, I want balancing fast enough to run on every layout, so that scrolling and rendering aren't affected.
-23. As an app developer, I want a repeated layout of the same text and width to reuse the earlier plan, so that drawing on the main thread is close to free.
+23. As an app developer, I want a repeated layout of the same text and width to reuse the earlier balanced breaks, so that drawing on the main thread is close to free.
 24. As an app developer, I want Dynamic Type changes to rebalance automatically, so that balanced text stays correct at every text size.
 25. As an app developer, I want the README to say exactly what balances and what falls back, so that I know what to expect without reading native code.
 26. As an app developer, I want the README to tell me how to re-apply balancing on Android when I switch `textBreakStrategy` at runtime (by changing a `key`), so that I can work around RN's Android behaviour.
@@ -75,27 +75,27 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 - The replacement calls the original first, so the storage is already font-scaled by `adjustsFontSizeToFit`. It acts only when `paragraphAttributes.textBreakStrategy == Balanced`. Every other `Text` returns exactly what the original returned.
 - RN's shared measure and lines caches key on `ParagraphAttributes`, which include `textBreakStrategy`. So balanced and stock layouts of the same string never share an entry.
 
-**Planning one paragraph** (tickets 08, 11 and 14).
+**Choosing balanced breaks for one paragraph** (tickets 08, 11 and 14).
 
 - Lay out at full width with unlimited lines to get the stock line count and group lines by paragraph. A paragraph with k ≤ 1 lines is left alone.
 - **Break candidates:** `CFStringTokenizer` line-break units (UAX #14, including kinsoku and dictionary breaking for Thai).
 - **Widths:** take logical-order advances from the paragraph's `CTRun` glyphs, prefix-summed by string index. Use the attachment `bounds` width for U+FFFC, strip trailing whitespace from each segment, and add the advance of `-` after a soft hyphen.
-- **DP:** choose the k-line plan that minimises Σ(U − wᵢ)² with no line wider than U, windowed for long CJK paragraphs.
-- **Skip** (stock wrapping) when a paragraph contains a tab, when no k-line plan fits (one segment wider than the box), or when the text truncates at `numberOfLines`. Text that fits within `numberOfLines` balances to that count.
+- **DP:** choose the k-line split that minimises Σ(U − wᵢ)² with no line wider than U, windowed for long CJK paragraphs.
+- **Skip** (stock wrapping) when a paragraph contains a tab, when no k-line split fits (one segment wider than the box), or when the text truncates at `numberOfLines`. Text that fits within `numberOfLines` balances to that count.
 
-**Imposing and checking the plan.**
+**Imposing and checking the balanced breaks.**
 
-- Swap RN's text container for an `NSTextContainer` subclass. It returns each planned line's width from `lineFragmentRectForProposedRect:atIndex:…`, keyed by the line's start character index, plus 1–4pt of slack (half the gap to the next candidate). The last line of each paragraph keeps the full width. The container, and so the Yoga box, stays at the stock size.
+- Swap RN's text container for an `NSTextContainer` subclass. It returns each balanced line's width from `lineFragmentRectForProposedRect:atIndex:…`, keyed by the line's start character index, plus 1–4pt of slack (half the gap to the next candidate). The last line of each paragraph keeps the full width. The container, and so the Yoga box, stays at the stock size.
 - Line rects sit on the stock text's alignment side: trailing for left-aligned, leading for right-aligned and RTL, centred for centred text.
-- **Check:** laid-out line starts must equal the plan. On a mismatch, run one repair retry. If that also fails, restore RN's container and leave that paragraph on stock wrapping. Fallback is per paragraph.
-- **Push-out:** while a checked plan is applied to a paragraph, clear `pushOut` from that paragraph's `lineBreakStrategy`. `standard` becomes `hangulWord`, and the hangul-word part is kept. On fallback, put back the original paragraph style. There's no warning. TextKit 1 currently ignores `pushOut` in RN, so this is about future-proofing more than visible behaviour.
+- **Check:** laid-out line starts must equal the balanced breaks. On a mismatch, run one repair retry. If that also fails, restore RN's container and leave that paragraph on stock wrapping. Fallback is per paragraph.
+- **Push-out:** while checked balanced breaks are applied to a paragraph, clear `pushOut` from that paragraph's `lineBreakStrategy`. `standard` becomes `hangulWord`, and the hangul-word part is kept. On fallback, put back the original paragraph style. There's no warning. TextKit 1 currently ignores `pushOut` in RN, so this is about future-proofing more than visible behaviour.
 
-**Plan cache** (ticket 14).
+**Break cache** (ticket 14).
 
 - An `NSCache` (`countLimit` 256) inside the hook.
 - **Key:** RN's input attributed string (compared with `isEqualToAttributedString:`, so string, fonts and paragraph style), width, `maximumNumberOfLines`, `adjustsFontSizeToFit`, and height when `adjustsFontSizeToFit` is on. Hash on string hash, width and max lines. Don't use `NSArray` hashing, which hashes by count.
-- **Value:** per paragraph, the planned line widths and side, or "stock", plus the ranges whose `pushOut` was cleared.
-- There's no explicit invalidation, because the key covers everything the plan depends on (Dynamic Type changes the fonts). `NSCache` evicts under memory pressure.
+- **Value:** per paragraph, the balanced line widths and side, or "stock", plus the ranges whose `pushOut` was cleared.
+- There's no explicit invalidation, because the key covers everything the balanced breaks depend on (Dynamic Type changes the fonts). `NSCache` evicts under memory pressure.
 - Measured effect: a hit costs 0.005ms, and mean overhead falls from 0.68ms to 0.25ms per build.
 
 **Performance budget:** a Release median of about 0.5ms and a p90 of about 1.4ms per uncached build. Korean, Thai and Arabic paragraphs set the p90.
@@ -115,7 +115,7 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
     - stock: identical lines to the stock render, for fallback cases;
     - unchanged: checked for every sample, the twin renders identically to stock, so the hook leaves every non-balanced `Text` alone.
   - A human reads it on the iOS simulator, and on an Android emulator to check native `balanced`. There's no UI automation.
-- **Good tests check external behaviour only:** the lines RN reports and what's drawn, never the plan, the DP or the cache directly.
+- **Good tests check external behaviour only:** the lines RN reports and what's drawn, never the balanced breaks, the DP or the cache directly.
 - **Sample set**, from tickets 06, 08, 10 and 14:
   - Latin headlines (left, centred, right, RTL) and a monospace headline;
   - a multi-paragraph sample and a long paragraph;
