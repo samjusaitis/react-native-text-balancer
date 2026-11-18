@@ -32,3 +32,10 @@ Spec: [spec.md](../../text-balance/spec.md). Decisions: [ADR 0001](../../../docs
 ## Comments
 
 - **Linking changed (implementation):** bun's `file:..` install ignores the `files` allowlist and copied the whole repo into the example's `node_modules`, example builds included, recursively (7.9 GB). The example now links the library by path through its own RN CLI config (dependency `root` set to the repo root), as RN library templates do. There's no dependency entry, no install copy and no `sync` script, and a native rebuild picks up library edits directly. Expo autolinking links it on iOS and skips it on Android. The spec's Example app line is updated to match.
+- **Pinned text size and a Dynamic Type section (after ticket 05):** at the XXL text size the screen showed 41/46, because the samples are tuned to wrap raggedly at the default size (diagnosis in ticket 05's comments). Changes:
+  - Samples render with `allowFontScaling={false}`.
+  - The `balanced` check also requires at least one line break to move: identical lines could pass on the trailing-space clipping alone (`adjusts-font-size` did at XXL).
+  - A Dynamic Type section adds three scalable samples (Latin, Japanese, multi-paragraph), each with two checks, rebalanced and no worse (see the spec's Testing Decisions).
+  - The summary now goes to `console.error` in Release builds, the only level a Release build passes to the native log. Debug still uses `console.log`.
+  - `example/scripts/sweep-text-sizes.sh` relaunches the app, steps the simulator from extra-small to the largest accessibility size, prints the summary and any ❌ at each size, then puts the text size back.
+- **Checked:** Release, iOS 27.2 simulator, 52/52 at all 12 sizes, both without the break cache and with ticket 05's cache (its uncommitted sources, built in temporarily). The pinned samples report the same results at every size. The Dynamic Type samples move their breaks at most sizes and keep stock's at a few, which passes as "no worse". A temporary bug that froze the long-lived balanced copy at its launch lines showed "rebalanced" ❌ at every size except Large, so the check catches a layout that doesn't rebalance.

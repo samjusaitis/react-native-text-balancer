@@ -110,12 +110,15 @@ It's distributed as a public GitHub repo, installed as a tag-pinned git dependen
 ## Testing Decisions
 
 - **One behaviour seam:** RN's own `Text` with `textBreakStrategy="balanced"`, observed through `onTextLayout`, in the example app's self-checking test screen.
-  - Each sample renders three times at a fixed width: stock (no `textBreakStrategy`), balanced, and a hidden twin with a non-balanced strategy (`highQuality`). The screen compares the lines and shows ✅ or ❌ per check.
+  - Each sample renders three times at a fixed width and a fixed text size (`allowFontScaling={false}`, because the samples are tuned to wrap raggedly at it): stock (no `textBreakStrategy`), balanced, and a hidden twin with a non-balanced strategy (`highQuality`). The screen compares the lines and shows ✅ or ❌ per check.
   - A sample's expectation is one of:
-    - balanced: same line count as stock, and the line widths vary less than stock's;
+    - balanced: same line count as stock, at least one line break moved, and the line widths vary less than stock's. The breaks have to move because a balanced line's narrowed fragment clips its trailing space, which stock's reported width includes, so identical lines can report a lower variance;
     - stock: identical lines to the stock render, for fallback cases;
     - unchanged: checked for every sample, the twin renders identically to stock, so the hook leaves every non-balanced `Text` alone.
-  - A human reads it on the iOS simulator, and on an Android emulator to check native `balanced`. There's no UI automation.
+  - **Dynamic Type samples** scale with the text size, so their wrapping changes with it. Each renders as stock, a balanced copy mounted since launch, and a hidden balanced copy remounted at each text size change with a string no other `Text` has had, so no cache can serve it. Checks that hold at any size:
+    - rebalanced: the long-lived copy's lines match the fresh copy's;
+    - no worse: same line count as stock, and either the same breaks (stock is already as even as it gets at this size, or the text fell back) or a lower width variance.
+  - A human reads it on the iOS simulator, and on an Android emulator to check native `balanced`. There's no UI automation. `example/scripts/sweep-text-sizes.sh` steps an iOS simulator through every Dynamic Type size (`simctl ui content_size`) while the screen runs, and reads the summary it logs at each size.
 - **Good tests check external behaviour only:** the lines RN reports and what's drawn, never the balanced breaks, the DP or the cache directly.
 - **Sample set**, from tickets 06, 08, 10 and 14:
   - Latin headlines (left, centred, right, RTL) and a monospace headline;

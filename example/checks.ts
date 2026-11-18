@@ -19,10 +19,18 @@ const sameLines = (a: Line[], b: Line[]) =>
   a.length === b.length &&
   a.every((line, i) => line.text === b[i].text && round(line.width) === round(b[i].width));
 
+const sameTexts = (a: Line[], b: Line[]) =>
+  a.length === b.length && a.every((line, i) => line.text === b[i].text);
+
 export function check(expect: Expectation, stock: Line[], actual: Line[]): Result {
   if (expect === 'balanced') {
     if (actual.length !== stock.length) {
       return { pass: false, detail: `${actual.length} lines, stock has ${stock.length}` };
+    }
+    // Same breaks can still report a lower variance: a balanced line's narrowed fragment clips
+    // its trailing space, which stock's reported width includes. So the breaks must move.
+    if (sameTexts(stock, actual)) {
+      return { pass: false, detail: 'same breaks as stock' };
     }
     const before = variance(stock);
     const after = variance(actual);
@@ -34,6 +42,32 @@ export function check(expect: Expectation, stock: Line[], actual: Line[]): Resul
   return sameLines(stock, actual)
     ? { pass: true, detail: 'identical to stock' }
     : { pass: false, detail: 'differs from stock' };
+}
+
+// A balanced layout that's no worse than stock: the same breaks (stock is already as even as it
+// can be at this size, or the paragraph fell back), or breaks that lower the width variance. For
+// the Dynamic Type samples, whose wrapping changes with the text size.
+export function noWorse(stock: Line[], actual: Line[]): Result {
+  if (actual.length !== stock.length) {
+    return { pass: false, detail: `${actual.length} lines, stock has ${stock.length}` };
+  }
+  if (sameTexts(stock, actual)) {
+    return { pass: true, detail: 'same breaks as stock' };
+  }
+  const before = variance(stock);
+  const after = variance(actual);
+  return {
+    pass: after < before,
+    detail: `width variance ${before.toFixed(0)} → ${after.toFixed(0)}`,
+  };
+}
+
+// A balanced Text that has lived through text size changes lays out exactly like one mounted fresh
+// at the current size.
+export function rebalanced(fresh: Line[], live: Line[]): Result {
+  return sameLines(fresh, live)
+    ? { pass: true, detail: 'matches a fresh layout' }
+    : { pass: false, detail: 'differs from a fresh layout' };
 }
 
 // Characters a Japanese line must not start with: closing punctuation and small kana.

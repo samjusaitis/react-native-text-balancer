@@ -2,7 +2,7 @@ import type { TextProps, TextStyle } from 'react-native';
 
 import type { Expectation } from './checks';
 
-// One test-screen sample: a string at a fixed width, and what `textBreakStrategy="balanced"`
+// One test-screen sample: a string at a fixed width and text size (Dynamic Type doesn't scale it), and what `textBreakStrategy="balanced"`
 // should do to it compared with stock wrapping. Later build tickets append their samples here.
 // A 'balanced' sample must wrap raggedly under stock wrapping on both platforms: if stock is
 // already as even as it can be, balancing rightly changes nothing and the check reads ❌.
@@ -227,5 +227,42 @@ export const SAMPLES: Sample[] = [
     expect: 'stock',
     style: { fontSize: 20 },
     props: { lineBreakStrategyIOS: 'push-out' },
+  },
+];
+
+// A Dynamic Type sample: a balanced string that scales with the text size, at a fixed width. Its
+// wrapping changes with the size, so it's checked for what holds at any size: the balanced copy
+// is no worse than stock, and matches a copy mounted fresh at the current size.
+export type DynamicTypeSample = {
+  id: string;
+  label: string;
+  text: string;
+  width: number;
+  style?: TextStyle;
+};
+
+export const DYNAMIC_TYPE_SAMPLES: DynamicTypeSample[] = [
+  {
+    id: 'dynamic-latin',
+    label: 'Latin headline, scales with text size',
+    text: 'Headlines rebalance whenever the reader picks a larger or smaller text size',
+    width: 240,
+    style: { fontSize: 22 },
+  },
+  {
+    id: 'dynamic-japanese',
+    label: 'Japanese, scales with text size',
+    text: '文字の大きさを変えると、見出しの行の長さもそれに合わせて揃え直されます。',
+    width: 240,
+    style: { fontSize: 20 },
+  },
+  {
+    id: 'dynamic-multi-paragraph',
+    label: 'Multi-paragraph, scales with text size',
+    text:
+      'Every paragraph rebalances on its own when the text size changes.\n' +
+      'A longer second paragraph wraps onto more lines, so it shares its words out differently.',
+    width: 240,
+    style: { fontSize: 16 },
   },
 ];
