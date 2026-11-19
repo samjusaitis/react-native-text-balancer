@@ -16,13 +16,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 // Balances the paragraphs of a TextKit 1 stack that React Native has just built, in place.
 //
-// `storage` has one layout manager with one text container, as RN's stack builder returns it. Each
-// paragraph with more than one line at the container's width gets minimum-raggedness balanced breaks
-// at the same line count, imposed through a per-line text container that replaces RN's (at the same
-// size), and checked against the lines TextKit then lays out. Break points follow UAX #14 (any
-// script), widths come from Core Text glyph advances. A paragraph whose breaks don't fit, or still
-// don't hold after one repair retry, keeps default wrapping; if no paragraph balances, RN's own container stays in place.
-// A paragraph containing a tab keeps default wrapping. Text that would truncate at `maximumNumberOfLines`
+// `storage` has one layout manager with one text container, as RN's stack builder returns it. The
+// plan comes from laying out RN's own container as it is: each paragraph with more than one line
+// there gets minimum-raggedness balanced breaks at the same line count, imposed through a per-line
+// text container that replaces RN's (at the same geometry), and checked against the lines TextKit
+// then lays out. Break points follow UAX #14 (any script), widths come from Core Text glyph
+// advances. A paragraph whose breaks don't fit, or still don't hold after one repair retry, keeps
+// default wrapping; if no paragraph balances, RN's own container stays in place, already laid out.
+// A paragraph containing a tab keeps default wrapping. Text that truncates at `maximumNumberOfLines`
 // (0 = unlimited) is left exactly as default wrapping leaves it; text that fits balances to its line count.
 // The storage itself is never edited: the only change is the text container.
 //

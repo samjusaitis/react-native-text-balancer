@@ -210,6 +210,15 @@ export const SAMPLES: Sample[] = [
     style: { fontSize: 24 },
   },
   {
+    // The box is two lines tall, so React Native's container cuts the rest off.
+    id: 'fixed-height-clipped',
+    label: 'Fixed height, clips lines (falls back)',
+    text: 'A box too short for this headline cuts its last lines off, so it keeps default wrapping',
+    width: 240,
+    expect: 'default',
+    style: { fontSize: 24, height: 60 },
+  },
+  {
     // A different string from the other samples: RN's measure cache ignores lineBreakStrategy.
     id: 'push-out-balanced',
     label: 'push-out, balancing paragraph',

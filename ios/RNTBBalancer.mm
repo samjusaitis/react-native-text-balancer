@@ -6,9 +6,6 @@
 #include <unordered_map>
 #include <vector>
 
-// Finite stand-in for measure's CGFLOAT_MAX height while counting and checking lines.
-static const CGFloat kUnboundedHeight = 1e7;
-
 // Which edge a narrowed line rect hugs inside the container's width: the text's alignment side, so
 // the space balancing frees up falls on the side the text is ragged on anyway.
 enum class RNTBSide { Left, Right, Centre };
@@ -452,29 +449,27 @@ RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger ma
   }
   CGSize size = container.size;
 
-  // All the work happens in our own container; RN's is never changed, so giving it back is exactly
-  // default wrapping. Every change to a container's geometry makes TextKit lay the whole storage out again,
-  // so the width container changes geometry once: from counting to RN's, before the check. (Moving
-  // RN's container to the counting geometry and back cost two extra layouts per build.)
-  //
-  // First, count default lines (the width container with no line widths lays out as RN's does),
-  // untruncated and unbounded in height, so every line shows up and none is cut off.
-  CGFloat padding = container.lineFragmentPadding;
-  RNTBLineWidthContainer *widthContainer =
-      widthContainerLike(container, CGSizeMake(size.width, MAX(size.height, kUnboundedHeight)));
-  widthContainer.maximumNumberOfLines = 0;
-  widthContainer.lineBreakMode = container.maximumNumberOfLines == 0 ? container.lineBreakMode : NSLineBreakByWordWrapping;
-  [layoutManager removeTextContainerAtIndex:0];
-  [layoutManager addTextContainer:widthContainer];
-  auto restoreDefault = [&]() {
-    [layoutManager removeTextContainerAtIndex:0];
-    [layoutManager addTextContainer:container];
-  };
-
-  std::vector<RNTBLaidOutLine> defaultLines = layOut(layoutManager, widthContainer);
-  if (maximumNumberOfLines > 0 && defaultLines.size() > maximumNumberOfLines) {
-    restoreDefault(); // truncates: default wrapping and the default ellipsis
-    return RNTBBalancedBreaks.defaultWrapping;
+  // The plan comes from RN's own layout: RN's container exactly as RN built it, so its lines are
+  // default wrapping, and when the outcome is default wrapping, RN's container goes back already
+  // laid out. Lines cut off or truncated there stay as RN laid them out. (Without a line limit RN
+  // clips the last line, which then holds the rest of its paragraph: that paragraph finds no
+  // balanced split at its line count below, and keeps default wrapping.)
+  bool complete;
+  std::vector<RNTBLaidOutLine> defaultLines = layOut(layoutManager, container, &complete);
+  // A truncating line break mode can put the rest of the text into the last line, so check that
+  // line too, as RN's processTruncatedAttributedText does.
+  bool truncated = false;
+  if (!defaultLines.empty()) {
+    NSUInteger lastLine = [layoutManager glyphIndexForCharacterAtIndex:defaultLines.back().start];
+    truncated = [layoutManager truncatedGlyphRangeInLineFragmentForGlyphAtIndex:lastLine].location != NSNotFound;
+  }
+  if (!complete || truncated) {
+    if (maximumNumberOfLines > 0 && defaultLines.size() >= maximumNumberOfLines) {
+      return RNTBBalancedBreaks.defaultWrapping; // truncates: default wrapping and the default ellipsis
+    }
+    // RN's height cut lines off, so the outcome depends on that height, which the break cache
+    // doesn't key on (only on the width): not reusable.
+    return nil;
   }
 
   // Group the default lines by paragraph and choose balanced breaks for each paragraph that wraps.
@@ -495,6 +490,7 @@ RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger ma
     paragraphs.back().defaultLines.push_back(line);
   }
 
+  CGFloat padding = container.lineFragmentPadding;
   CGFloat U = size.width - 2 * padding;
   bool anyBalanced = false;
   for (RNTBParagraph &p : paragraphs) {
@@ -512,38 +508,43 @@ RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger ma
     }
   }
   if (!anyBalanced) {
-    restoreDefault();
-    return RNTBBalancedBreaks.defaultWrapping;
+    return RNTBBalancedBreaks.defaultWrapping; // RN's container, already laid out
   }
 
-  // Impose the balanced breaks at RN's geometry, then check that each balanced paragraph's lines
-  // start at its breaks. A paragraph that doesn't hold gets one repair retry, then drops back to default
-  // wrapping. Paragraphs lay out independently (each starts on a fresh line), so that doesn't move
-  // the others; the next pass confirms it. If RN's height cuts lines off, nothing holds: default wrapping.
-  // Setting a geometry that hasn't changed (measure's height is already unbounded) doesn't
-  // invalidate the layout, and nor do the line widths, so invalidate it explicitly.
+  // Impose the balanced breaks through a width container at RN's geometry, then check that each
+  // balanced paragraph's lines start at its breaks and every other paragraph's at its default
+  // starts. RN's container is never changed, so giving it back is exactly default wrapping (RN
+  // then lays it out again). Paragraphs lay out independently (each starts on a fresh line), so a
+  // paragraph changing its breaks doesn't move the others; the next pass confirms it. A balanced
+  // paragraph that doesn't hold gets one repair retry, then drops back to default wrapping, so each
+  // paragraph changes at most twice and the loop ends. Past four passes, it settles for default wrapping.
+  RNTBLineWidthContainer *widthContainer = widthContainerLike(container, size);
   fill(widthContainer, paragraphs);
-  widthContainer.size = size;
-  widthContainer.maximumNumberOfLines = container.maximumNumberOfLines;
-  widthContainer.lineBreakMode = container.lineBreakMode;
-  [layoutManager textContainerChangedGeometry:widthContainer];
+  [layoutManager removeTextContainerAtIndex:0];
+  [layoutManager addTextContainer:widthContainer];
+  auto restoreDefault = [&]() {
+    [layoutManager removeTextContainerAtIndex:0];
+    [layoutManager addTextContainer:container];
+  };
 
-  bool holds = false;
-  bool cut = false; // RN's height (or line limit) cut lines off in some pass
-  CGFloat bottom = 0;
-  for (int pass = 0; pass < 4 && !holds; pass++) {
-    bool complete;
+  for (int pass = 0; pass < 4; pass++) {
     std::vector<RNTBLaidOutLine> laidOut = layOut(layoutManager, widthContainer, &complete);
-    cut = cut || !complete;
-    bottom = laidOut.empty() ? 0 : CGRectGetMaxY(laidOut.back().rect);
-    holds = true;
+    if (!complete) {
+      restoreDefault();
+      return nil; // RN's height cut lines off, as above
+    }
+    bool holds = true;
     anyBalanced = false;
     for (RNTBParagraph &p : paragraphs) {
       std::vector<NSUInteger> got = startsIn(laidOut, p);
       std::vector<NSUInteger> want = p.balanced ? p.breaks : startsIn(p.defaultLines, p);
       if (got != want) {
+        if (!p.balanced) {
+          restoreDefault(); // another pass would lay it out the same: default wrapping
+          return RNTBBalancedBreaks.defaultWrapping;
+        }
         holds = false;
-        if (p.balanced && !p.repaired) {
+        if (!p.repaired) {
           p.repaired = true;
           p.balanced = repair(p, got, U, padding);
         } else {
@@ -552,27 +553,19 @@ RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger ma
       }
       anyBalanced = anyBalanced || p.balanced;
     }
+    if (holds) {
+      return [[RNTBBalancedBreaks alloc] initWithLines:[widthContainer lines]
+                                         minimumHeight:CGRectGetMaxY(laidOut.back().rect)];
+    }
     if (!anyBalanced) {
       break;
     }
-    if (!holds) {
-      fill(widthContainer, paragraphs);
-      [layoutManager textContainerChangedGeometry:widthContainer];
-    }
+    // The line widths aren't geometry TextKit watches, so invalidate the layout explicitly.
+    fill(widthContainer, paragraphs);
+    [layoutManager textContainerChangedGeometry:widthContainer];
   }
-
-  if (!holds || !anyBalanced) {
-    restoreDefault(); // RN's own container: exactly default wrapping
-  }
-  // Lines cut off by RN's height make the outcome depend on that height, which the break cache
-  // doesn't key on (only on the width), so it isn't reusable.
-  if (cut) {
-    return nil;
-  }
-  if (!holds || !anyBalanced) {
-    return RNTBBalancedBreaks.defaultWrapping;
-  }
-  return [[RNTBBalancedBreaks alloc] initWithLines:[widthContainer lines] minimumHeight:bottom];
+  restoreDefault(); // RN's own container: exactly default wrapping
+  return RNTBBalancedBreaks.defaultWrapping;
 }
 
 void RNTBApplyBalancedBreaks(NSTextStorage *storage, RNTBBalancedBreaks *breaks)

@@ -4,7 +4,7 @@
 
 React Native builds the text layout for every iOS `Text` in one private method, `-[RCTTextLayoutManager _textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:]`. Measuring, drawing, `onTextLayout` and tap handling all go through it.
 
-When the app starts, the library swaps that method for its own version (this is called method swizzling). The new version calls React Native’s original first. Then, only if the `Text` asked for `textBreakStrategy="balanced"`, it chooses balanced breaks for each paragraph, tells iOS to lay the lines out that way, and checks that they came out as planned. If they didn’t, that paragraph goes back to default wrapping. Every other `Text` gets exactly what React Native built.
+When the app starts, the library swaps that method for its own version (this is called method swizzling). The new version calls React Native’s original first. Then, only if the `Text` asked for `textBreakStrategy="balanced"`, it lays the text out the way React Native built it, chooses balanced breaks for each paragraph from those lines (keeping the same number of lines), tells iOS to lay the lines out that way, and checks that they came out as planned. If they didn’t, that paragraph goes back to default wrapping. Text that truncates at `numberOfLines`, or is cut off by a fixed height, keeps default wrapping. Every other `Text` gets exactly what React Native built.
 
 Because everything goes through that one method, the text you measure, the text you see and the text you tap on always agree.
 
@@ -27,7 +27,7 @@ So a React Native upgrade can turn balancing off, but it can’t crash your app.
 
 ## Is it fast?
 
-Yes. In a Release build, balancing a `Text` usually takes about a third of a millisecond, and the slowest cases (Korean and Arabic) take about a millisecond. The library also remembers the breaks it chose for each string and width, so when React Native lays out the same text again, which it does a lot when drawing, reusing those breaks costs almost nothing.
+Yes. In a Release build, balancing a `Text` usually takes about a third of a millisecond, and the slowest cases (Korean and Arabic) take about a millisecond. Balancing lays the text out twice: once as React Native built it, to plan the breaks, and once with the balanced breaks. Text that keeps default wrapping (it fits on one line, truncates, or can’t balance) is laid out once, and that’s the layout React Native then uses, so it costs no more than React Native on its own. The library also remembers the breaks it chose for each string and width, so when React Native lays out the same text again, which it does a lot when drawing, reusing those breaks costs almost nothing.
 
 ## Android
 
