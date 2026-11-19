@@ -48,7 +48,9 @@ type Results = Record<string, Record<string, Result | undefined>>;
 const ONLY = Platform.OS === 'ios' ? (Settings.get('only') as string | undefined) : undefined;
 const shown = <T extends { id: string }>(samples: T[]) =>
   ONLY ? samples.filter((s) => s.id === ONLY) : samples;
-const SHOWN_SAMPLES = shown(SAMPLES);
+// Samples whose expectation only holds for the iOS library (see `skipOnAndroid`).
+const SKIPPED = Platform.OS === 'android' ? SAMPLES.filter((s) => s.skipOnAndroid) : [];
+const SHOWN_SAMPLES = shown(SAMPLES).filter((s) => !SKIPPED.includes(s));
 const SHOWN_DYNAMIC_TYPE_SAMPLES = shown(DYNAMIC_TYPE_SAMPLES);
 
 const TOTAL_CHECKS = (SHOWN_SAMPLES.length + SHOWN_DYNAMIC_TYPE_SAMPLES.length) * 2;
@@ -78,6 +80,9 @@ function Screen() {
     if (!done) return;
     const timer = setTimeout(() => {
       report(`[test screen] ${Platform.OS} @ text ×${scale}: ${passed}/${TOTAL_CHECKS} passed`);
+      for (const s of SKIPPED) {
+        report(`[test screen] ${s.id}: skipped on Android (${s.skipOnAndroid})`);
+      }
       for (const s of SHOWN_SAMPLES) {
         const r = results[s.id];
         report(
@@ -93,7 +98,9 @@ function Screen() {
       // One line each, so no log line gets long enough to be cut off.
       for (const s of [...SHOWN_SAMPLES, ...SHOWN_DYNAMIC_TYPE_SAMPLES]) {
         (balancedLines.current[s.id] ?? []).forEach((l, i) =>
-          report(`[test screen] lines ${s.id} ${i}: ${l.width.toFixed(2)} ${JSON.stringify(l.text)}`)
+          report(
+            `[test screen] lines ${s.id} ${i}: ${l.width.toFixed(2)} ${JSON.stringify(l.text)}`
+          )
         );
       }
     }, 1500);

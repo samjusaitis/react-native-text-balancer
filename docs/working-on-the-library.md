@@ -20,7 +20,7 @@ Use `bun run android` for Android.
 
 The main screen is the test screen. It renders each sample at a fixed width three times: once with default wrapping, once balanced, and once with a different strategy (`highQuality`) to make sure the library leaves other `Text`s alone. It compares the lines each one reports through `onTextLayout`, and shows ✅ or ❌ for each check, with a summary at the top. Balanced samples pass when they keep default wrapping’s line count, move at least one break and come out more even. Fallback samples pass when they match default wrapping exactly.
 
-On Android, the same screen checks React Native’s own `balanced`.
+On Android, the same screen checks React Native’s own `balanced`. Samples whose expectation only holds for the iOS library set `skipOnAndroid` to the reason, and are skipped there. The summary lists them with their reasons.
 
 To check Dynamic Type, `example/scripts/sweep-text-sizes.sh` steps a booted iOS simulator through every text size while the test screen runs, and prints the result at each size. The top of the script explains how to build and install the app first.
 

@@ -29,6 +29,9 @@ export type Sample = {
   // Japanese line-start rules: the balanced copy must not start a line with closing punctuation
   // or small kana.
   kinsoku?: boolean;
+  // Why the sample doesn't apply on Android, where the screen checks React Native's own `balanced`:
+  // set, the sample is skipped there. Its expectation describes the iOS library's behaviour.
+  skipOnAndroid?: string;
 };
 
 export const SAMPLES: Sample[] = [
@@ -85,6 +88,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'latin-no-fixed-width',
+    skipOnAndroid:
+      "Android's default wrapping of this text is already as even as balancing makes it, so the breaks can't move: the text is tuned to wrap raggedly in the iOS font.",
     label: 'Latin headline, no fixed width',
     text: 'Without a fixed width the box keeps its usual size while this headline balances',
     width: 240,
@@ -104,6 +109,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'hyphenated',
+    skipOnAndroid:
+      "Android's default wrapping of this text is already as even as balancing makes it, so the breaks can't move: the text is tuned to wrap raggedly in the iOS font.",
     label: 'Hyphenated compounds',
     text: 'State-of-the-art, well-known and up-to-date cross-platform text-wrapping for real-world apps',
     width: 240,
@@ -112,6 +119,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'soft-hyphen',
+    skipOnAndroid:
+      'Android balances the long word by breaking it mid-word without drawing a hyphen, so it changes the line count.',
     label: 'Soft-hyphen word',
     text: 'Soft hyphens let Donau\u00ADdampf\u00ADschiff\u00ADfahrts\u00ADgesell\u00ADschaft break',
     width: 240,
@@ -180,6 +189,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'adjusts-font-size',
+    skipOnAndroid:
+      "Android's default wrapping of the fitted text is already as even as balancing makes it, so the breaks can't move.",
     label: 'adjustsFontSizeToFit, numberOfLines 3',
     text: 'A fitted headline scales its font down to fit three lines first, then balances those lines evenly',
     width: 240,
@@ -189,6 +200,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'number-of-lines-fits',
+    skipOnAndroid:
+      "Android's default wrapping of this text is already as even as balancing makes it, so the breaks can't move: the text is tuned to wrap raggedly in the iOS font.",
     label: 'numberOfLines 3, fits',
     text: 'A clamped headline that fits within its line limit still balances its lines',
     width: 240,
@@ -198,6 +211,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'number-of-lines-truncates',
+    skipOnAndroid:
+      "Android reports the truncated tail as padding characters that include each rendering's distinct suffix, so even the default renderings can't be compared.",
     label: 'numberOfLines 2, truncates',
     text: 'A clamped headline that runs past its line limit keeps default wrapping and the default ellipsis at the end of the last line',
     width: 240,
@@ -215,6 +230,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'wide-word',
+    skipOnAndroid:
+      'Android balances anyway, breaking the over-wide word wherever it fits; the iOS library falls back.',
     label: 'Word wider than the box',
     text: 'Antidisestablishmentarianism-everywhere is one word wider than this box',
     width: 240,
@@ -224,6 +241,8 @@ export const SAMPLES: Sample[] = [
   {
     // The box is two lines tall, so React Native's container cuts the rest off.
     id: 'fixed-height-clipped',
+    skipOnAndroid:
+      'Android lays out every line whatever the box height, so it balances clipped text; the iOS library falls back.',
     label: 'Fixed height, clips lines (falls back)',
     text: 'A box too short for this headline cuts its last lines off, so it keeps default wrapping',
     width: 240,
@@ -262,6 +281,8 @@ export const SAMPLES: Sample[] = [
   },
   {
     id: 'justified',
+    skipOnAndroid:
+      'Android balances justified text and then justifies each line to the full width; the iOS library falls back (a known difference, see docs/what-it-does.md).',
     label: 'Justified',
     text: 'Justified text stretches the spaces between its words so every line but the last fills the box',
     width: 240,
