@@ -24,14 +24,15 @@ NS_ASSUME_NONNULL_BEGIN
 // then lays out. Break points follow UAX #14 (any script), widths come from Core Text glyph
 // advances. A paragraph whose breaks don't fit, or still don't hold after one repair retry, keeps
 // default wrapping; if no paragraph balances, RN's own container stays in place, already laid out.
-// A paragraph containing a tab, or justified, keeps default wrapping. Text that truncates at `maximumNumberOfLines`
-// (0 = unlimited) is left exactly as default wrapping leaves it; text that fits balances to its line count.
+// A paragraph containing a tab, or justified, keeps default wrapping. Text that truncates at the
+// container's maximumNumberOfLines (0 = unlimited, as RN sets it from the paragraph attributes) is
+// left exactly as default wrapping leaves it; text that fits balances to its line count.
 // The storage itself is never edited: the only change is the text container.
 //
 // Returns what it applied, for RNTBApplyBalancedBreaks to reapply to a stack built from the same
 // input. Returns nil when the container's height cut lines off or clipped the last line, because
 // then the outcome depends on that height.
-RNTBBalancedBreaks *_Nullable RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger maximumNumberOfLines);
+RNTBBalancedBreaks *_Nullable RNTBBalanceTextStorage(NSTextStorage *storage);
 
 // Applies balanced breaks that RNTBBalanceTextStorage returned for a stack built from the same input
 // (attributed string, paragraph attributes and width) to this one, without choosing or checking

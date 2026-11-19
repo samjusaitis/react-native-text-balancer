@@ -13,7 +13,8 @@
 // The break cache: RN caches measure and lines, but draw (on the main thread) and hit-test build
 // the stack again for the same string and width. So the hook keeps what balancing applied and
 // reapplies it to later stacks built from the same input. The key is everything the outcome
-// depends on, so nothing needs invalidating (Dynamic Type changes the fonts, so the key).
+// depends on (the string, all the paragraph attributes, the width), so nothing needs invalidating
+// (Dynamic Type changes the fonts, so the key).
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -24,6 +25,7 @@
 #import <React/RCTLog.h>
 #import <cxxreact/ReactNativeVersion.h>
 #import <react/renderer/attributedstring/ParagraphAttributes.h>
+#import <react/utils/hash_combine.h>
 
 #import "RNTBBalancer.h"
 
@@ -39,10 +41,10 @@ static NSString *const kHookClass = @"RCTTextLayoutManager";
 static NSString *const kHookSelector = @"_textStorageAndLayoutManagerWithAttributesString:paragraphAttributes:size:";
 
 // A break cache key: RN's input attributed string (before any adjustsFontSizeToFit scaling),
-// compared attribute by attribute, plus the paragraph attributes and size that change the outcome.
-// Height only matters when adjustsFontSizeToFit scales to it; otherwise RNTBBalancedBreaks'
-// minimumHeight covers it.
-@interface RNTBBreakCacheKey : NSObject <NSCopying>
+// compared attribute by attribute, plus the paragraph attributes (compared and hashed as RN's own
+// caches do) and the size. Height only matters when adjustsFontSizeToFit scales to it; otherwise
+// RNTBBalancedBreaks' minimumHeight covers it. NSCache doesn't copy its keys.
+@interface RNTBBreakCacheKey : NSObject
 - (instancetype)initWithString:(NSAttributedString *)string
            paragraphAttributes:(const ParagraphAttributes &)paragraphAttributes
                           size:(CGSize)size;
@@ -50,10 +52,9 @@ static NSString *const kHookSelector = @"_textStorageAndLayoutManagerWithAttribu
 
 @implementation RNTBBreakCacheKey {
   NSAttributedString *_string;
+  ParagraphAttributes _paragraphAttributes;
   CGFloat _width;
   CGFloat _height;
-  NSUInteger _maximumNumberOfLines;
-  BOOL _adjustsFontSizeToFit;
   NSUInteger _hash;
 }
 
@@ -63,18 +64,12 @@ static NSString *const kHookSelector = @"_textStorageAndLayoutManagerWithAttribu
 {
   if (self = [super init]) {
     _string = [string copy];
+    _paragraphAttributes = paragraphAttributes;
     _width = size.width;
-    _adjustsFontSizeToFit = paragraphAttributes.adjustsFontSizeToFit;
-    _height = _adjustsFontSizeToFit ? size.height : 0;
-    _maximumNumberOfLines = paragraphAttributes.maximumNumberOfLines;
-    _hash = _string.string.hash ^ std::hash<CGFloat>{}(_width) ^ (_maximumNumberOfLines << 20);
+    _height = paragraphAttributes.adjustsFontSizeToFit ? size.height : 0;
+    _hash = facebook::react::hash_combine(_string.string.hash, _width, _paragraphAttributes);
   }
   return self;
-}
-
-- (id)copyWithZone:(NSZone *)zone
-{
-  return self; // immutable
 }
 
 - (NSUInteger)hash
@@ -89,8 +84,7 @@ static NSString *const kHookSelector = @"_textStorageAndLayoutManagerWithAttribu
   }
   RNTBBreakCacheKey *other = object;
   return _hash == other->_hash && _width == other->_width && _height == other->_height &&
-      _maximumNumberOfLines == other->_maximumNumberOfLines && _adjustsFontSizeToFit == other->_adjustsFontSizeToFit &&
-      [_string isEqualToAttributedString:other->_string];
+      _paragraphAttributes == other->_paragraphAttributes && [_string isEqualToAttributedString:other->_string];
 }
 
 @end
@@ -127,7 +121,7 @@ static NSTextStorage *RNTBBuild(
     RNTBApplyBalancedBreaks(storage, breaks);
     return storage;
   }
-  breaks = RNTBBalanceTextStorage(storage, paragraphAttributes.maximumNumberOfLines);
+  breaks = RNTBBalanceTextStorage(storage);
   if (breaks != nil) {
     [breakCache() setObject:breaks forKey:key];
   }
@@ -156,7 +150,8 @@ static NSTextStorage *RNTBBuild(
     // Deferred so RN's logging is set up; +load runs once, so this warns once per process.
     dispatch_async(dispatch_get_main_queue(), ^{
       RCTLogWarn(
-          @"react-native-text-balancer: %@. textBreakStrategy=\"balanced\" uses default wrapping on iOS with this React Native version.",
+          @"react-native-text-balancer: %@. textBreakStrategy=\"balanced\" uses default wrapping on iOS "
+          @"with this React Native version.",
           problem);
     });
 #endif
