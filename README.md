@@ -54,6 +54,10 @@ Then rebuild your iOS app. The library links itself automatically, so there’s 
 - **[How it works, and why it’s safe](docs/how-it-works.md)** – the private method it swizzles, how it fails safe, speed, and a note on Android.
 - **[Working on the library](docs/working-on-the-library.md)** – the example app’s test screen and `verify:matrix`.
 
+## Future improvements
+
+- **Balance justified text on iOS.** On Android, `textAlign: 'justify'` with `textBreakStrategy="balanced"` balances the breaks and then justifies each line to the full width. On iOS, justified paragraphs currently keep default wrapping, because the library balances by narrowing lines and iOS would then justify each line only to its narrowed width. Matching Android means forcing the balanced breaks at full width instead. See [what it does](docs/what-it-does.md#things-that-might-surprise-you).
+
 ## License
 
 MIT

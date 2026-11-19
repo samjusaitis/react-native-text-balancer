@@ -163,8 +163,13 @@ function SampleCard({
 }) {
   const [lines, setLines] = useState<Partial<Record<Rendering, Line[]>>>({});
   const [pressed, setPressed] = useState<string>();
+  // A `clipFirst` sample's balanced copy starts clipped and grows once it has laid out. Every
+  // layout is recorded, so the check settles on the grown one: iOS reports the grown layout as a
+  // new event, but Android lays the text out the same at any height and sends no second event.
+  const [grown, setGrown] = useState(!sample.clipFirst);
 
   const onLayout = (rendering: Rendering) => (e: TextLayoutEvent) => {
+    if (rendering === 'test' && !grown) setGrown(true);
     const next = e.nativeEvent.lines.map((l) => ({
       text: undistinct(l.text),
       width: l.width,
@@ -226,7 +231,7 @@ function SampleCard({
       <View style={styles.row}>
         <View style={styles.box}>
           <Text
-            style={textStyle}
+            style={[textStyle, !grown && { height: sample.clipFirst }]}
             allowFontScaling={false}
             {...sample.props}
             textBreakStrategy="balanced"

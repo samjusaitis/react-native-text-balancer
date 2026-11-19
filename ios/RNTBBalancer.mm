@@ -95,7 +95,8 @@ static std::vector<RNTBLaidOutLine> layOut(NSLayoutManager *layoutManager, NSTex
   return lines;
 }
 
-// One paragraph (text between hard line breaks) of the storage.
+// One paragraph of the storage: the text between hard line breaks (newlines, U+2029 and U+2028).
+// Parts split by U+2028 share their paragraph style.
 struct RNTBParagraph {
   NSRange full; // including its line terminator
   NSRange content; // without it
@@ -416,6 +417,24 @@ static void fill(RNTBLineWidthContainer *container, const std::vector<RNTBParagr
 
 @end
 
+// Whether TextKit clipped the last line of a complete layout, the line starting at glyph `lastLine`.
+// Without a line limit RN's container clips: when its height cuts the text off, TextKit puts the
+// rest of the last paragraph into the last line there's room for and hides the glyphs past the
+// edge. That layout counts as complete and not truncated, but the height changed it. The line's
+// used rect and glyph bounds stop at the edge, so look for the hidden glyphs instead: outside
+// clipping, TextKit only hides null glyphs (ligature parts, a truncated line's tail) and control
+// characters (newlines, tabs, soft hyphens, U+2060, attachments).
+static bool clipsLastLine(NSLayoutManager *layoutManager, NSUInteger lastLine)
+{
+  for (NSUInteger g = lastLine; g < layoutManager.numberOfGlyphs; g++) {
+    if ([layoutManager notShownAttributeForGlyphAtIndex:g] &&
+        !([layoutManager propertyForGlyphAtIndex:g] & (NSGlyphPropertyNull | NSGlyphPropertyControlCharacter))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // The storage's one layout manager and text container, as RN's stack builder returns them, if the
 // container has a width the hook can balance in.
 static bool stackOf(NSTextStorage *storage, NSLayoutManager **layoutManager, NSTextContainer **container)
@@ -451,32 +470,33 @@ RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger ma
 
   // The plan comes from RN's own layout: RN's container exactly as RN built it, so its lines are
   // default wrapping, and when the outcome is default wrapping, RN's container goes back already
-  // laid out. Lines cut off or truncated there stay as RN laid them out. (Without a line limit RN
-  // clips the last line, which then holds the rest of its paragraph: that paragraph finds no
-  // balanced split at its line count below, and keeps default wrapping.)
+  // laid out. Lines cut off, truncated or clipped there stay as RN laid them out.
   bool complete;
   std::vector<RNTBLaidOutLine> defaultLines = layOut(layoutManager, container, &complete);
-  // A truncating line break mode can put the rest of the text into the last line, so check that
-  // line too, as RN's processTruncatedAttributedText does.
+  // A truncating or clipping line break mode can put the rest of the text into the last line, so
+  // check that line too, as RN's processTruncatedAttributedText does.
   bool truncated = false;
   if (!defaultLines.empty()) {
     NSUInteger lastLine = [layoutManager glyphIndexForCharacterAtIndex:defaultLines.back().start];
-    truncated = [layoutManager truncatedGlyphRangeInLineFragmentForGlyphAtIndex:lastLine].location != NSNotFound;
+    truncated = [layoutManager truncatedGlyphRangeInLineFragmentForGlyphAtIndex:lastLine].location != NSNotFound ||
+        (complete && clipsLastLine(layoutManager, lastLine));
   }
   if (!complete || truncated) {
     if (maximumNumberOfLines > 0 && defaultLines.size() >= maximumNumberOfLines) {
       return RNTBBalancedBreaks.defaultWrapping; // truncates: default wrapping and the default ellipsis
     }
-    // RN's height cut lines off, so the outcome depends on that height, which the break cache
-    // doesn't key on (only on the width): not reusable.
+    // RN's height cut lines off or clipped the last one, so the outcome depends on that height,
+    // which the break cache doesn't key on (only on the width): not reusable.
     return nil;
   }
 
   // Group the default lines by paragraph and choose balanced breaks for each paragraph that wraps.
+  // A paragraph here ends at any hard line break, a line separator (U+2028) included: TextKit
+  // always breaks there, so each part balances on its own, as with \n.
   NSString *string = storage.string;
   std::vector<RNTBParagraph> paragraphs;
   for (const RNTBLaidOutLine &line : defaultLines) {
-    NSRange full = [string paragraphRangeForRange:NSMakeRange(line.start, 0)];
+    NSRange full = [string lineRangeForRange:NSMakeRange(line.start, 0)];
     if (paragraphs.empty() || !NSEqualRanges(paragraphs.back().full, full)) {
       RNTBParagraph p;
       p.full = full;
@@ -499,6 +519,10 @@ RNTBBalancedBreaks *RNTBBalanceTextStorage(NSTextStorage *storage, NSUInteger ma
     }
     if ([string rangeOfString:@"\t" options:NSLiteralSearch range:p.content].location != NSNotFound) {
       continue; // a tab's width depends on where it lands: default wrapping
+    }
+    NSParagraphStyle *style = [storage attribute:NSParagraphStyleAttributeName atIndex:p.content.location effectiveRange:NULL];
+    if (style.alignment == NSTextAlignmentJustified) {
+      continue; // narrowed lines can't be justified to the full width: default wrapping
     }
     gatherInputs(storage, p);
     if (chooseBreaks(p, U, padding)) {

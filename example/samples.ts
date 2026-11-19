@@ -23,6 +23,9 @@ export type Sample = {
   links?: string[];
   // A `View` rendered inside the `Text`, straight after the first occurrence of `after`.
   inlineView?: { after: string; width: number; height: number };
+  // Render the balanced copy in a box this tall first, then let it grow to fit once it has laid
+  // out. Only the grown layout is checked.
+  clipFirst?: number;
   // Japanese line-start rules: the balanced copy must not start a line with closing punctuation
   // or small kana.
   kinsoku?: boolean;
@@ -70,6 +73,15 @@ export const SAMPLES: Sample[] = [
     width: 220,
     expect: 'balanced',
     style: { fontSize: 16 },
+  },
+  {
+    // U+2028 forces a line break, like \n, without starting a new paragraph style.
+    id: 'line-separator',
+    label: 'Line separator (U+2028)',
+    text: 'A short first part that wraps\u2028and a second part that runs on long enough to wrap',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 22 },
   },
   {
     id: 'latin-no-fixed-width',
@@ -219,6 +231,17 @@ export const SAMPLES: Sample[] = [
     style: { fontSize: 24, height: 60 },
   },
   {
+    // The balanced copy starts in a box too short for it, then grows: the clipped layout must not
+    // leave a cached outcome that keeps the grown box on default wrapping.
+    id: 'grows-after-clipped',
+    label: 'Grows after a clipped first layout',
+    text: 'A box that starts out too short for this headline grows taller and then the headline balances',
+    width: 240,
+    expect: 'balanced',
+    style: { fontSize: 24 },
+    clipFirst: 60,
+  },
+  {
     // A different string from the other samples: RN's measure cache ignores lineBreakStrategy.
     id: 'push-out-balanced',
     label: 'push-out, balancing paragraph',
@@ -236,6 +259,14 @@ export const SAMPLES: Sample[] = [
     expect: 'default',
     style: { fontSize: 20 },
     props: { lineBreakStrategyIOS: 'push-out' },
+  },
+  {
+    id: 'justified',
+    label: 'Justified',
+    text: 'Justified text stretches the spaces between its words so every line but the last fills the box',
+    width: 240,
+    expect: 'default',
+    style: { fontSize: 22, textAlign: 'justify' },
   },
 ];
 

@@ -27,7 +27,7 @@ So a React Native upgrade can turn balancing off, but it can’t crash your app.
 
 ## Is it fast?
 
-Yes. In a Release build, balancing a `Text` usually takes about a third of a millisecond, and the slowest cases (Korean and Arabic) take about a millisecond. Balancing lays the text out twice: once as React Native built it, to plan the breaks, and once with the balanced breaks. Text that keeps default wrapping (it fits on one line, truncates, or can’t balance) is laid out once, and that’s the layout React Native then uses, so it costs no more than React Native on its own. The library also remembers the breaks it chose for each string and width, so when React Native lays out the same text again, which it does a lot when drawing, reusing those breaks costs almost nothing.
+Yes. In a Release build, balancing a `Text` usually takes about a third of a millisecond, and the slowest cases (Korean and Arabic) take about a millisecond. Balancing lays the text out twice: once as React Native built it, to plan the breaks, and once with the balanced breaks. Text that keeps default wrapping (it fits on one line, truncates, or can’t balance) is laid out once, and that’s the layout React Native then uses, so it costs no more than React Native on its own. The library also remembers the breaks it chose for each string and width, so when React Native lays out the same text again, which it does a lot when drawing, reusing those breaks costs almost nothing. It doesn’t remember anything for text cut off by a fixed height, because the result there depends on the height: if the box grows, the text balances at its new size.
 
 ## Android
 
