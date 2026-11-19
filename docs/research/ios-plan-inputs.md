@@ -1,6 +1,8 @@
 # iOS min-raggedness plan: break candidates and widths
 
-Date researched: 2026-11-17. Question ([ticket 11](../issues/11-ios-plan-inputs-research.md)): how should the iOS min-raggedness plan get line-break opportunities and segment widths that match TextKit 1, so it stops falling back to stock wrapping on hyphens, CJK, Thai, bidi and inline attachments? What does that cover, what still falls back, and what does it cost against [ticket 10](../issues/10-ios-own-paragraph-component-prototype.md)'s 0.49ms median per build?
+> A design-time research note, kept as written. Numbers like 04, 08 or 10 name the prototypes listed in [the research index](README.md#prototypes). What shipped is in [the ADRs](../adr/).
+
+Date researched: 2026-11-17. Question: how should the iOS min-raggedness plan get line-break opportunities and segment widths that match TextKit 1, so it stops falling back to stock wrapping on hyphens, CJK, Thai, bidi and inline attachments? What does that cover, what still falls back, and what does it cost against the own-component prototype's (10) 0.49ms median per build?
 
 Builds on [ios-balancing-alternatives.md](ios-balancing-alternatives.md) (mechanism 2a, the per-line `NSTextContainer` subclass) and on the 08/10 prototype code.
 
@@ -9,7 +11,7 @@ Sources:
 - RN source: the installed **0.88.1** package at `example/node_modules/react-native`. `RTLM` = `ReactCommon/react/renderer/textlayoutmanager/platform/ios/react/renderer/textlayoutmanager/RCTTextLayoutManager.mm`, `RATU` = `RCTAttributedTextUtils.mm` in the same folder.
 - Prototype: `ios/BalancedParagraph.mm` on branch `prototype/10-ios-own-paragraph-component` (`BP:line`).
 
-**Nothing here was run.** No build, no simulator. Costs are estimates scaled from ticket 10's measured numbers; every behavioural claim about TextKit that the docs don't state is marked unverified.
+**Nothing here was run.** No build, no simulator. Costs are estimates scaled from prototype 10's measured numbers; every behavioural claim about TextKit that the docs don't state is marked unverified.
 
 ## Verdict
 
@@ -41,7 +43,7 @@ What 08/10 do (`BP:155-166`): one `CTLine` of the paragraph, `CTLineGetOffsetFor
 Problems and fixes:
 
 - **Bidi.** `CTLineGetOffsetForStringIndex` returns a **visual** caret position. In a mixed LTR/RTL paragraph, a logical range is not one contiguous visual interval, so `|x(end) - x(start)|` is wrong. Fix: take advances in logical order. Each `CTRun` gives glyph advances (`CTRunGetAdvances`, `CTRun.h:288`) and the string index of each glyph (`CTRunGetStringIndices`, `CTRun.h:320`). Add each glyph's advance to its character's slot, then prefix-sum by string index. TextKit breaks lines on logical ranges, and a line's width is the sum of its glyph advances whatever the visual order, so the sum is additive. (Bidi reordering after the break is TextKit's job; the plan container already positions RTL lines, `BP:110-119`.)
-- **Attachments.** RN builds attachments as `NSTextAttachment` with `bounds` set to the child view's frame (`RATU:409-417`). `NSTextAttachment.bounds` is "the layout bounds of the text attachment's graphical representation in the text coordinate system" ([bounds](https://developer.apple.com/documentation/uikit/nstextattachment/bounds.md)). Core Text does not know `NSAttachmentAttributeName`; its own embedded-object mechanism is `kCTRunDelegateAttributeName`, which it recommends applying to "a range containing the single character U+FFFC" (`CTStringAttributes.h:288-303`). That is why ticket 10 saw zero width. Fix: after the prefix pass, set the U+FFFC slot to `attachment.bounds.size.width` (no need to rebuild the string with run delegates). Whether TextKit 1 adds any spacing around attachments is unverified; the slack absorbs a point or two.
+- **Attachments.** RN builds attachments as `NSTextAttachment` with `bounds` set to the child view's frame (`RATU:409-417`). `NSTextAttachment.bounds` is "the layout bounds of the text attachment's graphical representation in the text coordinate system" ([bounds](https://developer.apple.com/documentation/uikit/nstextattachment/bounds.md)). Core Text does not know `NSAttachmentAttributeName`; its own embedded-object mechanism is `kCTRunDelegateAttributeName`, which it recommends applying to "a range containing the single character U+FFFC" (`CTStringAttributes.h:288-303`). That is why prototype 10 saw zero width. Fix: after the prefix pass, set the U+FFFC slot to `attachment.bounds.size.width` (no need to rebuild the string with run delegates). Whether TextKit 1 adds any spacing around attachments is unverified; the slack absorbs a point or two.
 - **Kerning and ligatures across a break.** In one paragraph-wide `CTLine`, the last glyph of a segment carries its kern to the next glyph, and a ligature can't span a break opportunity in practice (ligatures are within words). At a real break, that kern disappears. The error is a fraction of a point and stays inside the existing 1-4pt slack (`BP:205-208`). Letter spacing (`NSKernAttributeName`, RN `letterSpacing`) is already in the advances.
 - **Trailing whitespace.** Keep stripping it from the segment end, as 08 does. Core Text treats trailing whitespace as outside the fitting width ("Creating a line for a width can result in a line that is actually longer than the desired width due to trailing whitespace", `CTLine.h:382-398`, [CTLineGetTrailingWhitespaceWidth](https://developer.apple.com/documentation/coretext/ctlinegettrailingwhitespacewidth(_:).md)). 08/10's 0 mismatches on Latin samples show TextKit 1 does the same. For CJK, U+3000 is already treated as a break space (`BP:127`).
 - **Soft hyphen (U+00AD).** If TextKit breaks there it draws a hyphen glyph that isn't in the string. Add the advance of `-` in that run's font to segments ending at a SHY. Whether TextKit 1 breaks at a SHY with hyphenation off is unverified.
@@ -67,14 +69,14 @@ Problems and fixes:
 
 ## 4. Probing TextKit instead of summing segments
 
-- **Lay out each candidate line in TextKit:** a DP needs a width for every feasible (start, end) pair: O(m · c) of them, hundreds for a 3-line paragraph. Ticket 10's 0.49ms median covers about two full layouts plus one `CTLine`, so a layout is on the order of 0.1-0.2ms. Hundreds of probes is tens of milliseconds. **Rejected.**
+- **Lay out each candidate line in TextKit:** a DP needs a width for every feasible (start, end) pair: O(m · c) of them, hundreds for a 3-line paragraph. Prototype 10's 0.49ms median covers about two full layouts plus one `CTLine`, so a layout is on the order of 0.1-0.2ms. Hundreds of probes is tens of milliseconds. **Rejected.**
 - **`CTTypesetterCreateLine` per feasible pair:** exact Core Text widths without a layout manager, but still O(m · c) line objects. At an assumed 5-20µs each, that is about 1-6ms. Too costly for every build; use it only for the k chosen lines (§2).
 - **Probe with `CTTypesetterSuggestLineBreak`:** greedy only (§1), so it can't produce a min-raggedness plan.
 - **What the recommendation keeps from probing:** TextKit is still the judge. The verify step (`BP:288-297`) is the probe, and the repair retry adds at most one more layout on mismatching paragraphs.
 
 ## 5. Cost
 
-Baseline (ticket 10): median 0.49ms, p90 0.88ms per stack build.
+Baseline (prototype 10): median 0.49ms, p90 0.88ms per stack build.
 
 | Step | Change | Estimated delta |
 |---|---|---|

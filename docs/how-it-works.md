@@ -25,6 +25,13 @@ react-native-text-balancer: ... textBreakStrategy="balanced" uses default wrappi
 
 So a React Native upgrade can turn balancing off, but it can’t crash your app. The method’s signature hasn’t changed from React Native 0.85 up to its current main branch.
 
+## React Native bugs you might notice
+
+These come from React Native itself and happen with or without the library:
+
+- **Right-to-left press highlights land in the wrong place on iOS.** When you press a span in Arabic or other right-to-left text, React Native draws the highlight over the wrong part of the text, because it passes a character range where a glyph range is expected. Taps still go to the right span.
+- **Android ignores a runtime switch to `balanced`.** If you change `textBreakStrategy` while the app is running, say from `"highQuality"` to `"balanced"`, Android doesn’t always pick up the change. The text keeps its old wrapping until the `Text` is re-created. You can force that by giving it a `key` that changes along with the strategy.
+
 ## Is it fast?
 
 Yes. In a Release build, balancing a `Text` usually takes about a third of a millisecond, and the slowest cases (Korean and Arabic) take about a millisecond. Balancing lays the text out twice: once as React Native built it, to plan the breaks, and once with the balanced breaks. Text that keeps default wrapping (it fits on one line, truncates, or can’t balance) is laid out once, and that’s the layout React Native then uses, so it costs no more than React Native on its own. The library also remembers the breaks it chose for each string and width, so when React Native lays out the same text again, which it does a lot when drawing, reusing those breaks costs almost nothing. It doesn’t remember anything for text cut off by a fixed height, because the result there depends on the height: if the box grows, the text balances at its new size.
@@ -33,12 +40,6 @@ Yes. In a Release build, balancing a `Text` usually takes about a third of a mil
 
 On Android this library does nothing. React Native already balances there on its own.
 
-There’s one React Native bug worth knowing about. If you change `textBreakStrategy` while the app is running, say from `"highQuality"` to `"balanced"`, Android doesn’t always pick up the change. The text keeps its old wrapping until the `Text` is re-created. You can force that by giving it a `key` that changes along with the strategy:
+## Why it’s built this way
 
-```tsx
-<Text key={strategy} textBreakStrategy={strategy}>
-  {title}
-</Text>
-```
-
-You only need this if you switch strategies at runtime. If the prop is fixed, you don’t.
+The [architecture decision records](adr/) explain the main choices, such as minimum raggedness over a simpler squeeze, and why there’s no Android code. The [research and prototypes](research/README.md) behind them are kept too.

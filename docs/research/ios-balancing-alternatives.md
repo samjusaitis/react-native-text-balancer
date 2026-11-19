@@ -1,6 +1,8 @@
 # iOS balancing alternatives to the tailIndent spike
 
-Date researched: 2026-11-17. Question ([ticket 05](../issues/05-ios-balancing-alternatives-research.md)): which iOS approaches balance RN Fabric `Text` line breaks without the two trade-offs from [ticket 04](../issues/04-ios-tailindent-injection-prototype.md): (1) the pressed nested-span highlight runs to the box edge, past the narrowed line; (2) no `adjustsFontSizeToFit` support.
+> A design-time research note, kept as written. Numbers like 04, 08 or 10 name the prototypes listed in [the research index](README.md#prototypes). What shipped is in [the ADRs](../adr/).
+
+Date researched: 2026-11-17. Question: which iOS approaches balance RN Fabric `Text` line breaks without the two trade-offs found by the `tailIndent` prototype (04): (1) the pressed nested-span highlight runs to the box edge, past the narrowed line; (2) no `adjustsFontSizeToFit` support.
 
 Builds on [ios-native-balancing.md](ios-native-balancing.md) (no built-in iOS balance API; the RN pipeline overview). This note does not repeat that work.
 

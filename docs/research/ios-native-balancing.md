@@ -1,5 +1,7 @@
 # iOS native text balancing and the RN Fabric text pipeline
 
+> A design-time research note, kept as written. Numbers like 04, 08 or 10 name the prototypes listed in [the research index](README.md#prototypes). What shipped is in [the ADRs](../adr/).
+
 Date researched: 2026-11-17. Question: does iOS have built-in layout that achieves CSS `text-wrap: balance`, and where could a custom width be injected in React Native's Fabric iOS text pipeline?
 
 ## Verdict

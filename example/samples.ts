@@ -3,7 +3,7 @@ import type { TextProps, TextStyle } from 'react-native';
 import type { Expectation } from './checks';
 
 // One test-screen sample: a string at a fixed width and text size (Dynamic Type doesn't scale it), and what `textBreakStrategy="balanced"`
-// should do to it compared with default wrapping. Later build tickets append their samples here.
+// should do to it compared with default wrapping.
 // A 'balanced' sample must wrap raggedly under default wrapping on both platforms: if default wrapping is
 // already as even as it can be, balancing rightly changes nothing and the check reads ❌.
 export type Sample = {

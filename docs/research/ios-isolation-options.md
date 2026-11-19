@@ -1,4 +1,6 @@
-# 09 — Isolating balancing from RN's own Text (iOS, RN 0.88.1)
+# Isolating balancing from RN's own Text (iOS, RN 0.88.1)
+
+> A design-time research note, kept as written. Numbers like 04, 08 or 10 name the prototypes listed in [the research index](README.md#prototypes). What shipped is in [the ADRs](../adr/).
 
 Paths are relative to `example/node_modules/react-native/` unless noted. RN = `ReactCommon/react/renderer/`.
 

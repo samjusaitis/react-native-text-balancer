@@ -6,7 +6,7 @@ The repo has an example app with a self-checking test screen, and a script that 
 
 ## The example app
 
-The example is an Expo app that links the library straight from the repo, so rebuilding the app picks up your native changes. It uses Bun and runs Metro on port 8100.
+The example is an Expo app that links the library straight from the repo, so rebuilding the app picks up your native changes.
 
 ```bash
 cd example && bun install
@@ -39,3 +39,13 @@ For every React Native minor version from 0.85 up, plus the current release cand
 A full run takes about 12 minutes and needs Xcode, CocoaPods and the Android SDK. You can also name the versions to test, like `bun run verify:matrix 0.86 rc`. Run `scripts/verify-matrix.sh --help` for the other options.
 
 A full pass is what lets us release, or say a new React Native version is supported.
+
+## Gotchas
+
+- **Metro started with `CI=1` doesn’t watch files.** Restart it (with `--clear`) after JS edits.
+- **`simctl` screenshots can lag one action behind.** Wait about a second after a tap before taking one.
+- **Give each test sample its own string.** React Native’s measure cache ignores `lineBreakStrategy`, so two `Text`s with the same string can share one `onTextLayout` result. The test screen’s `distinct` helper handles this.
+
+## Design history
+
+The decisions behind the library are in [`docs/adr/`](adr/), and the research and prototypes that led to them are in [`docs/research/`](research/README.md). The prototype code is on the `prototype/*` branches.

@@ -1,6 +1,8 @@
 # Android: why `textBreakStrategy` updates don't re-apply on Fabric
 
-Date researched: 2026-11-17. Question (ticket [07](../issues/07-android-text-break-strategy-rerender-research.md)): on Android Fabric, why does toggling `textBreakStrategy` from `highQuality` back to `balanced` have no effect, while a `key` remount fixes it? Is it fixed upstream?
+> A design-time research note, kept as written. Numbers like 04, 08 or 10 name the prototypes listed in [the research index](README.md#prototypes). What shipped is in [the ADRs](../adr/).
+
+Date researched: 2026-11-17. Question: on Android Fabric, why does toggling `textBreakStrategy` from `highQuality` back to `balanced` have no effect, while a `key` remount fixes it? Is it fixed upstream?
 
 Primary source: RN 0.88.1 as installed at `example/node_modules/react-native` (paths below are relative to that folder). Upstream checked on `facebook/react-native` `main` and `v0.89.0-rc.1` via the GitHub API on 2026-11-17.
 
@@ -57,7 +59,7 @@ The prototype saw `balanced → highQuality` re-apply and `highQuality → balan
 - On the first toggle, the props-changed clone carries the previous frame's metrics. They differ from the empty ones, so the attributed strings compare unequal, and the state update (with the new `paragraphAttributes`) goes through **by accident**.
 - On the second toggle, both sides carry the same frame. The test app fixes `width: w`, and both strategies usually give the same line count, so the height matches too. The strings compare equal and the update is skipped.
 
-Predicted behaviour: only the first toggle after mount applies. Later toggles apply only when the paragraph's frame size changes (for example, a different line count). This fits the ticket 03 observation, but I didn't run it.
+Predicted behaviour: only the first toggle after mount applies. Later toggles apply only when the paragraph's frame size changes (for example, a different line count). This fits what the Android prototype (03) saw, but I didn't run it.
 
 ## 5. Upstream status
 
